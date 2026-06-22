@@ -53,57 +53,70 @@ export default function Actions() {
     }
   };
 
-  if (loading) return <p>Loading action tracker...</p>;
-  if (error) return <p style={{ color: 'red' }}>Error: {error}</p>;
+  if (loading) return <div className="app-container"><p>Loading action tracker...</p></div>;
+  if (error) return <div className="app-container"><p style={{ color: 'var(--danger)' }}>Error: {error}</p></div>;
 
   return (
     <div>
-      <Link to="/">&larr; Back to Home</Link>
-      <h1>Action Tracker</h1>
+      <Link to="/" className="back-link">&larr; Back to Home</Link>
+      <div style={{ marginBottom: '30px' }}>
+        <h1>Action Tracker</h1>
+        <p style={{ margin: '4px 0 0 0' }}>Monitor and assign target completion statuses across all meeting logs</p>
+      </div>
+
       {actions.length === 0 ? (
-        <p>No action items found.</p>
+        <div className="card" style={{ textAlign: 'center', padding: '40px' }}>
+          <p>No action items assigned across meetings yet.</p>
+        </div>
       ) : (
-        <table border="1" cellPadding="5" style={{ borderCollapse: 'collapse', width: '100%' }}>
+        <table>
           <thead>
             <tr>
               <th>ID</th>
-              <th>Description</th>
+              <th>Task Description</th>
               <th>Owner</th>
               <th>Due Date</th>
-              <th>Meeting Details (Dept / Forum)</th>
+              <th>Origin Forum</th>
               <th>Current Status</th>
-              <th>Update Status</th>
+              <th style={{ textAlign: 'right' }}>Update Status</th>
             </tr>
           </thead>
           <tbody>
             {actions.map((a) => (
               <tr key={a.id}>
-                <td>{a.id}</td>
+                <td><strong>#{a.id}</strong></td>
                 <td>{a.description}</td>
-                <td>{a.owner}</td>
+                <td><strong>{a.owner}</strong></td>
                 <td>{a.due_date}</td>
                 <td>
-                  <Link to={`/meetings/${a.meeting_id}`}>
-                    {a.department} / {a.forum_type} ({a.date})
+                  <Link to={`/meetings/${a.meeting_id}`} style={{ color: '#a5b4fc', textDecoration: 'none' }}>
+                    {a.department} / {a.forum_type}
                   </Link>
                 </td>
-                <td><strong>{a.status}</strong></td>
                 <td>
-                  <select
-                    value={statusDrafts[a.id] || a.status}
-                    onChange={(e) => handleStatusChange(a.id, e.target.value)}
-                    style={{ marginRight: '10px' }}
-                  >
-                    <option value="Open">Open</option>
-                    <option value="Pending">Pending</option>
-                    <option value="Closed">Closed</option>
-                  </select>
-                  <button
-                    onClick={() => handleSaveStatus(a.id)}
-                    disabled={updateLoading[a.id]}
-                  >
-                    {updateLoading[a.id] ? 'Saving...' : 'Save'}
-                  </button>
+                  <span className={`badge badge-${a.status.toLowerCase()}`}>
+                    {a.status}
+                  </span>
+                </td>
+                <td style={{ textAlign: 'right' }}>
+                  <div style={{ display: 'inline-flex', gap: '8px' }}>
+                    <select
+                      value={statusDrafts[a.id] || a.status}
+                      onChange={(e) => handleStatusChange(a.id, e.target.value)}
+                      style={{ padding: '6px 12px', fontSize: '0.85rem', width: 'auto' }}
+                    >
+                      <option value="Open">Open</option>
+                      <option value="Pending">Pending</option>
+                      <option value="Closed">Closed</option>
+                    </select>
+                    <button
+                      onClick={() => handleSaveStatus(a.id)}
+                      disabled={updateLoading[a.id]}
+                      style={{ padding: '6px 12px', fontSize: '0.85rem' }}
+                    >
+                      {updateLoading[a.id] ? 'Saving...' : 'Save'}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
