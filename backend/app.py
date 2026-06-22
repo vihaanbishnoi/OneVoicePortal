@@ -81,6 +81,14 @@ def call_ollama(prompt):
 
 # --- API Endpoints ---
 
+# Root Endpoint
+@app.route('/', methods=['GET'])
+def index():
+    return jsonify({
+        'status': 'healthy',
+        'message': 'OneVoice Portal REST API is running. Access the user interface via your React development server (usually at http://localhost:5173).'
+    })
+
 # Create new meeting
 @app.route('/api/meetings', methods=['POST'])
 def create_meeting():
