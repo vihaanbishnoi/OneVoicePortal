@@ -10,7 +10,7 @@ import Reports from './pages/Reports';
 function App() {
   return (
     <Router>
-      <div style={{ padding: '20px' }}>
+      <div className="app-container">
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/new-meeting" element={<NewMeeting />} />

@@ -53,27 +53,31 @@ export default function Reports() {
 
   return (
     <div>
-      <Link to="/">&larr; Back to Home</Link>
-      <h1>Search & Reports</h1>
+      <Link to="/" className="back-link">&larr; Back to Home</Link>
+      
+      <div style={{ marginBottom: '30px' }}>
+        <h1>Search & Insights Reports</h1>
+        <p style={{ margin: '4px 0 0 0' }}>Search recorded data or query local AI to group recurring complaints across forums</p>
+      </div>
 
       {/* Filter Section */}
-      <fieldset>
-        <legend>Filters</legend>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px' }}>
+      <div className="card">
+        <h3 style={{ border: 'none', padding: '0', marginBottom: '15px' }}>Filter Criteria</h3>
+        <div className="grid-filters">
           <div>
-            <label>Department: </label>
-            <input type="text" value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="e.g. HR, Sales" />
+            <label>Department / Unit</label>
+            <input type="text" value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="e.g. Sales, Engineering" />
           </div>
           <div>
-            <label>Date Range (Start): </label>
+            <label>Date range (Start)</label>
             <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
           </div>
           <div>
-            <label>Date Range (End): </label>
+            <label>Date range (End)</label>
             <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
           </div>
           <div>
-            <label>Category: </label>
+            <label>Point Category</label>
             <select value={category} onChange={(e) => setCategory(e.target.value)}>
               <option value="">All Categories</option>
               <option value="Facility">Facility</option>
@@ -83,7 +87,7 @@ export default function Reports() {
             </select>
           </div>
           <div>
-            <label>Status: </label>
+            <label>Action Status</label>
             <select value={status} onChange={(e) => setStatus(e.target.value)}>
               <option value="">All Statuses</option>
               <option value="Open">Open</option>
@@ -92,40 +96,33 @@ export default function Reports() {
             </select>
           </div>
         </div>
-      </fieldset>
 
-      <br />
-
-      {/* Action Buttons */}
-      <div style={{ display: 'flex', gap: '15px' }}>
-        <button onClick={handleSearch} disabled={searchLoading}>
-          {searchLoading ? 'Searching...' : 'Run DB Search'}
-        </button>
-        <button onClick={handleGenerateInsights} disabled={insightsLoading}>
-          {insightsLoading ? 'Generating AI Insights...' : 'Generate AI Insights (Recurring themes)'}
-        </button>
+        <div style={{ display: 'flex', gap: '15px', marginTop: '25px' }}>
+          <button onClick={handleSearch} disabled={searchLoading} style={{ flex: 1 }}>
+            {searchLoading ? 'Searching...' : '🔍 Run Database Search'}
+          </button>
+          <button onClick={handleGenerateInsights} disabled={insightsLoading} style={{ flex: 1 }} className="btn-secondary">
+            {insightsLoading ? 'Analyzing recurring issues...' : '💡 Generate AI Theme Insights'}
+          </button>
+        </div>
       </div>
-
-      <br /><hr /><br />
 
       {/* AI Insights Section */}
       {insights && (
-        <div>
-          <h2>AI Insights (Recurring Themes)</h2>
-          <div style={{ padding: '10px', border: '1px solid #ccc', backgroundColor: '#f9f9f9' }}>
-            <pre style={{ whiteSpace: 'pre-wrap' }}>{insights}</pre>
-          </div>
-          <br /><hr /><br />
+        <div className="card ai-section" style={{ borderLeft: '4px solid var(--primary)' }}>
+          <h3 style={{ border: 'none', padding: '0', color: 'var(--primary)', marginBottom: '8px' }}>🤖 AI Recurring Theme Insights</h3>
+          <p style={{ fontSize: '0.85rem', marginBottom: '15px' }}>Ollama has analyzed matched discussion points to group and rank common feedback themes:</p>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{insights}</pre>
         </div>
       )}
 
       {/* Search Results Sections */}
       {searchResults && (
-        <div>
-          <h2>Search Results</h2>
+        <div style={{ marginTop: '40px' }}>
+          <h2>Database Search Results</h2>
           
-          <h3>Matching Meetings</h3>
-          <table border="1" cellPadding="5" style={{ borderCollapse: 'collapse', width: '100%' }}>
+          <h3 style={{ marginTop: '20px' }}>Meetings ({searchResults.meetings.length})</h3>
+          <table>
             <thead>
               <tr>
                 <th>ID</th>
@@ -138,28 +135,28 @@ export default function Reports() {
             </thead>
             <tbody>
               {searchResults.meetings.length === 0 ? (
-                <tr><td colSpan="6">No matching meetings.</td></tr>
+                <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No meetings matching the department criteria.</td></tr>
               ) : (
                 searchResults.meetings.map(m => (
                   <tr key={m.id}>
-                    <td>{m.id}</td>
-                    <td>{m.forum_type}</td>
+                    <td><strong>#{m.id}</strong></td>
+                    <td><span className="badge badge-open" style={{ backgroundColor: 'rgba(99,102,241,0.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.2)' }}>{m.forum_type}</span></td>
                     <td>{m.date}</td>
                     <td>{m.department}</td>
                     <td>{m.facilitator}</td>
-                    <td>{m.num_participants}</td>
+                    <td>{m.num_participants} attendees</td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
 
-          <h3>Matching Discussion Points</h3>
-          <table border="1" cellPadding="5" style={{ borderCollapse: 'collapse', width: '100%' }}>
+          <h3 style={{ marginTop: '30px' }}>Discussion Log ({searchResults.discussions.length})</h3>
+          <table>
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Meeting Info (Dept/Date)</th>
+                <th>Department & Date</th>
                 <th>Discussion Point</th>
                 <th>Category</th>
                 <th>Priority</th>
@@ -168,29 +165,37 @@ export default function Reports() {
             </thead>
             <tbody>
               {searchResults.discussions.length === 0 ? (
-                <tr><td colSpan="6">No matching discussions.</td></tr>
+                <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No discussions matching filter criteria.</td></tr>
               ) : (
                 searchResults.discussions.map(dp => (
                   <tr key={dp.id}>
-                    <td>{dp.id}</td>
+                    <td><strong>#{dp.id}</strong></td>
                     <td>{dp.department} ({dp.date})</td>
                     <td>{dp.discussion_point}</td>
-                    <td>{dp.category}</td>
-                    <td>{dp.priority}</td>
-                    <td>{dp.sentiment || 'Not Analyzed'}</td>
+                    <td><span className="badge badge-open" style={{ backgroundColor: 'rgba(59,130,246,0.1)', color: '#93c5fd', border: '1px solid rgba(59,130,246,0.2)' }}>{dp.category}</span></td>
+                    <td>
+                      <span className={`badge badge-${dp.priority ? dp.priority.toLowerCase() : 'medium'}`}>
+                        {dp.priority}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`badge badge-${dp.sentiment ? dp.sentiment.toLowerCase() : 'neutral'}`}>
+                        {dp.sentiment || 'Not Analyzed'}
+                      </span>
+                    </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
 
-          <h3>Matching Action Items</h3>
-          <table border="1" cellPadding="5" style={{ borderCollapse: 'collapse', width: '100%' }}>
+          <h3 style={{ marginTop: '30px' }}>Action Items ({searchResults.actions.length})</h3>
+          <table>
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Meeting Info (Dept/Date)</th>
-                <th>Description</th>
+                <th>Origin Forum</th>
+                <th>Task Description</th>
                 <th>Owner</th>
                 <th>Due Date</th>
                 <th>Status</th>
@@ -198,16 +203,20 @@ export default function Reports() {
             </thead>
             <tbody>
               {searchResults.actions.length === 0 ? (
-                <tr><td colSpan="6">No matching action items.</td></tr>
+                <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No action items matching filter criteria.</td></tr>
               ) : (
                 searchResults.actions.map(a => (
                   <tr key={a.id}>
-                    <td>{a.id}</td>
-                    <td>{a.department} ({a.date})</td>
+                    <td><strong>#{a.id}</strong></td>
+                    <td>{a.department} / {a.forum_type}</td>
                     <td>{a.description}</td>
-                    <td>{a.owner}</td>
+                    <td><strong>{a.owner}</strong></td>
                     <td>{a.due_date}</td>
-                    <td>{a.status}</td>
+                    <td>
+                      <span className={`badge badge-${a.status.toLowerCase()}`}>
+                        {a.status}
+                      </span>
+                    </td>
                   </tr>
                 ))
               )}
