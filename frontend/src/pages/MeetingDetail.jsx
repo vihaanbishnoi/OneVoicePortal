@@ -1,13 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import {
-  fetchMeeting,
-  addDiscussion,
-  addAction,
-  analyzeSentiment,
-  generateMOM,
-  generateSummary
-} from '../api';
+import { fetchMeeting, addMeetingLog, updateRemarks } from '../api';
 
 export default function MeetingDetail() {
   const { id } = useParams();
@@ -15,33 +8,26 @@ export default function MeetingDetail() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // Discussion Form State
+  // New Log Entry Form State
   const [discussionPoint, setDiscussionPoint] = useState('');
-  const [category, setCategory] = useState('Facility');
+  const [category, setCategory] = useState('');
   const [priority, setPriority] = useState('Medium');
-  const [discussionLoading, setDiscussionLoading] = useState(false);
-
-  // Action Form State
   const [actionDesc, setActionDesc] = useState('');
-  const [owner, setOwner] = useState('');
-  const [dueDate, setDueDate] = useState('');
-  const [actionLoading, setActionLoading] = useState(false);
+  const [contactPerson, setContactPerson] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [formLoading, setFormLoading] = useState(false);
 
-  // AI Outputs State
-  const [momText, setMomText] = useState('');
-  const [momLoading, setMomLoading] = useState(false);
-  const [summary, setSummary] = useState(null);
-  const [summaryLoading, setSummaryLoading] = useState(false);
-  const [sentimentLoading, setSentimentLoading] = useState({});
+  // Inline editing state
+  const [editingRowId, setEditingRowId] = useState(null);
+  const [editOwnerRemarks, setEditOwnerRemarks] = useState('');
+  const [editHrRemarks, setEditHrRemarks] = useState('');
+  const [saveLoading, setSaveLoading] = useState(false);
 
   useEffect(() => {
     async function loadMeeting() {
       try {
         const data = await fetchMeeting(id);
         setMeeting(data);
-        if (data.mom_text) {
-          setMomText(data.mom_text);
-        }
       } catch (err) {
         setError(err.message || 'Failed to load meeting details');
       } finally {
@@ -51,93 +37,78 @@ export default function MeetingDetail() {
     loadMeeting();
   }, [id]);
 
-  const handleAddDiscussion = async (e) => {
+  const handleAddLogEntry = async (e) => {
     e.preventDefault();
-    if (!discussionPoint) return;
-    setDiscussionLoading(true);
+    if (!discussionPoint || !category || !actionDesc || !contactPerson) {
+      alert('Please fill in all required fields.');
+      return;
+    }
+    setFormLoading(true);
     try {
-      const result = await addDiscussion(id, {
+      const result = await addMeetingLog(id, {
         discussion_point: discussionPoint,
         category,
-        priority
+        priority,
+        action_description: actionDesc,
+        contact_person: contactPerson,
+        contact_email: contactEmail
       });
       setMeeting({
         ...meeting,
-        discussion_points: [...meeting.discussion_points, result]
+        logs: [...meeting.logs, result]
       });
+      // Reset form
       setDiscussionPoint('');
-    } catch (err) {
-      alert('Error adding discussion: ' + err.message);
-    } finally {
-      setDiscussionLoading(false);
-    }
-  };
-
-  const handleAddAction = async (e) => {
-    e.preventDefault();
-    if (!actionDesc || !owner || !dueDate) return;
-    setActionLoading(true);
-    try {
-      const result = await addAction(id, {
-        description: actionDesc,
-        owner,
-        due_date: dueDate
-      });
-      setMeeting({
-        ...meeting,
-        action_items: [...meeting.action_items, result]
-      });
+      setCategory('');
+      setPriority('Medium');
       setActionDesc('');
-      setOwner('');
-      setDueDate('');
+      setContactPerson('');
+      setContactEmail('');
     } catch (err) {
-      alert('Error adding action: ' + err.message);
+      alert('Error adding log entry: ' + err.message);
     } finally {
-      setActionLoading(false);
+      setFormLoading(false);
     }
   };
 
-  const handleSentimentAnalysis = async (dpId) => {
-    setSentimentLoading(prev => ({ ...prev, [dpId]: true }));
+  const startEditing = (log) => {
+    setEditingRowId(log.id);
+    setEditOwnerRemarks(log.owner_remarks || '');
+    setEditHrRemarks(log.hr_remarks || '');
+  };
+
+  const cancelEditing = () => {
+    setEditingRowId(null);
+  };
+
+  const handleSaveRemarks = async (logId) => {
+    setSaveLoading(true);
     try {
-      const result = await analyzeSentiment(dpId);
-      setMeeting(prev => {
-        const updatedDps = prev.discussion_points.map(dp => {
-          if (dp.id === dpId) {
-            return { ...dp, sentiment: result.sentiment };
-          }
-          return dp;
-        });
-        return { ...prev, discussion_points: updatedDps };
+      const result = await updateRemarks(logId, {
+        owner_remarks: editOwnerRemarks,
+        hr_remarks: editHrRemarks
       });
+      // Update local logs list
+      setMeeting(prev => {
+        const updatedLogs = prev.logs.map(log => {
+          if (log.id === logId) {
+            return {
+              ...log,
+              owner_remarks: result.owner_remarks,
+              owner_remarks_date: result.owner_remarks_date,
+              hr_remarks: result.hr_remarks,
+              hr_remarks_date: result.hr_remarks_date
+            };
+          }
+          return log;
+        });
+        return { ...prev, logs: updatedLogs };
+      });
+      setEditingRowId(null);
     } catch (err) {
-      alert('Sentiment analysis failed: ' + err.message);
+      alert('Failed to save remarks: ' + err.message);
     } finally {
-      setSentimentLoading(prev => ({ ...prev, [dpId]: false }));
-    }
-  };
-
-  const handleGenerateMOM = async () => {
-    setMomLoading(true);
-    try {
-      const result = await generateMOM(id);
-      setMomText(result.mom_text);
-    } catch (err) {
-      alert('Failed to generate MOM: ' + err.message);
-    } finally {
-      setMomLoading(false);
-    }
-  };
-
-  const handleGenerateSummary = async () => {
-    setSummaryLoading(true);
-    try {
-      const result = await generateSummary(id);
-      setSummary(result);
-    } catch (err) {
-      alert('Failed to generate summary: ' + err.message);
-    } finally {
-      setSummaryLoading(false);
+      setSaveLoading(false);
     }
   };
 
@@ -148,11 +119,18 @@ export default function MeetingDetail() {
     return 'badge badge-medium';
   };
 
-  const getSentimentBadgeClass = (s) => {
-    const val = s ? s.toLowerCase() : '';
-    if (val === 'positive') return 'badge badge-positive';
-    if (val === 'negative') return 'badge badge-negative';
-    return 'badge badge-neutral';
+  const makeGmailLink = (email, contactPerson, discussionPoint, actionDescription) => {
+    if (!email) return '';
+    const subject = encodeURIComponent(`OneVoice Portal Follow-up - ${meeting.forum_type} (${meeting.date})`);
+    const body = encodeURIComponent(
+      `Hello ${contactPerson},\n\n` +
+      `Regarding the discussion point raised in our meeting on ${meeting.date}:\n` +
+      `"${discussionPoint}"\n\n` +
+      `Follow-up Action needed:\n` +
+      `"${actionDescription}"\n\n` +
+      `Please reply to this email with your updates. Thank you!`
+    );
+    return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${subject}&body=${body}`;
   };
 
   if (loading) return <div className="app-container"><p>Loading meeting details...</p></div>;
@@ -160,220 +138,262 @@ export default function MeetingDetail() {
   if (!meeting) return <div className="app-container"><p>Meeting not found.</p></div>;
 
   return (
-    <div>
-      <Link to="/meetings" className="back-link">&larr; Back to Meetings List</Link>
-      
-      <div style={{ marginBottom: '30px', borderBottom: '1px solid var(--border)', paddingBottom: '20px' }}>
-        <span className="badge badge-open" style={{ marginBottom: '10px', fontSize: '0.8rem', backgroundColor: 'rgba(99,102,241,0.2)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+      <div style={{ alignSelf: 'flex-start' }}>
+        <Link to="/meetings" className="back-link">&larr; Back to Meetings Log</Link>
+      </div>
+
+      <div style={{ marginBottom: '30px', textAlign: 'center', width: '100%' }}>
+        <span className="badge badge-open" style={{ marginBottom: '10px', fontSize: '0.8rem', backgroundColor: 'var(--primary-light)', color: 'var(--primary)' }}>
           {meeting.forum_type}
         </span>
         <h1>Meeting Details #{meeting.id}</h1>
-        <div style={{ display: 'flex', gap: '30px', flexWrap: 'wrap', marginTop: '15px' }}>
+        <div style={{ display: 'flex', gap: '30px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '15px' }}>
           <div><span style={{ color: 'var(--text-muted)' }}>Date:</span> <strong>{meeting.date}</strong></div>
           <div><span style={{ color: 'var(--text-muted)' }}>Department:</span> <strong>{meeting.department}</strong></div>
           <div><span style={{ color: 'var(--text-muted)' }}>Facilitator:</span> <strong>{meeting.facilitator}</strong></div>
           <div><span style={{ color: 'var(--text-muted)' }}>Participants:</span> <strong>{meeting.num_participants}</strong></div>
         </div>
+
+        {/* Participant list if HR logged names */}
+        {meeting.participants_list && meeting.participants_list.length > 0 && (
+          <div style={{ marginTop: '20px', maxWidth: '600px', margin: '20px auto 0 auto', padding: '12px', border: '1px solid var(--border-light)', borderRadius: 'var(--radius)', backgroundColor: '#ffffff' }}>
+            <h4 style={{ fontSize: '0.9rem', marginBottom: '8px', textAlign: 'left', color: 'var(--text-main)' }}>Participant Registry:</h4>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-start' }}>
+              {meeting.participants_list.map((p, index) => (
+                <span key={index} style={{ fontSize: '0.8rem', backgroundColor: '#f1f5f9', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-light)' }}>
+                  <strong>{p.name}</strong> {p.empid ? `(ID: ${p.empid})` : ''}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Discussion Points Section */}
-      <h2>Discussion Points Log</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Discussion Point</th>
-            <th>Category</th>
-            <th>Priority</th>
-            <th>Sentiment Tone</th>
-            <th style={{ textAlign: 'right' }}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {meeting.discussion_points.length === 0 ? (
-            <tr><td colSpan="6" style={{ color: 'var(--text-muted)', textAlign: 'center' }}>No discussion points logged yet.</td></tr>
-          ) : (
-            meeting.discussion_points.map((dp) => (
-              <tr key={dp.id}>
-                <td><strong>#{dp.id}</strong></td>
-                <td>{dp.discussion_point}</td>
-                <td><span className="badge badge-open" style={{ backgroundColor: 'rgba(59,130,246,0.1)', color: '#93c5fd', border: '1px solid rgba(59,130,246,0.2)' }}>{dp.category}</span></td>
-                <td><span className={getPriorityBadgeClass(dp.priority)}>{dp.priority}</span></td>
-                <td><span className={getSentimentBadgeClass(dp.sentiment)}>{dp.sentiment || 'Pending AI'}</span></td>
-                <td style={{ textAlign: 'right' }}>
-                  <button
-                    onClick={() => handleSentimentAnalysis(dp.id)}
-                    disabled={sentimentLoading[dp.id]}
-                    className="btn-secondary"
-                    style={{ padding: '6px 12px', fontSize: '0.8rem' }}
-                  >
-                    {sentimentLoading[dp.id] ? 'Analyzing...' : 'Tag Sentiment'}
-                  </button>
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+      {/* Discussion & Action Combined Log Table */}
+      <h2>Discussion & Action Log</h2>
+      <div style={{ width: '100%', overflowX: 'auto' }}>
+        <table>
+          <thead>
+            <tr>
+              <th style={{ width: '60px' }}>ID</th>
+              <th>Discussion Point & Action</th>
+              <th style={{ width: '120px' }}>Category</th>
+              <th style={{ width: '100px' }}>Priority</th>
+              <th style={{ width: '160px' }}>Contact Person</th>
+              <th>Action Owner Remarks</th>
+              <th>HR Remarks</th>
+              <th style={{ width: '120px', textAlign: 'right' }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {meeting.logs.length === 0 ? (
+              <tr><td colSpan="8" style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '30px' }}>No logs recorded for this meeting.</td></tr>
+            ) : (
+              meeting.logs.map((log) => {
+                const isEditing = editingRowId === log.id;
+                const mailUrl = makeGmailLink(log.contact_email, log.contact_person, log.discussion_point, log.action_description);
 
-      {/* Action Items Section */}
-      <h2>Action Items Assigned</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Description</th>
-            <th>Owner</th>
-            <th>Due Date</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {meeting.action_items.length === 0 ? (
-            <tr><td colSpan="5" style={{ color: 'var(--text-muted)', textAlign: 'center' }}>No action items assigned.</td></tr>
-          ) : (
-            meeting.action_items.map((ai) => (
-              <tr key={ai.id}>
-                <td><strong>#{ai.id}</strong></td>
-                <td>{ai.description}</td>
-                <td><strong>{ai.owner}</strong></td>
-                <td>{ai.due_date}</td>
-                <td>
-                  <span className={`badge badge-${ai.status.toLowerCase()}`}>
-                    {ai.status}
-                  </span>
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+                return (
+                  <tr key={log.id}>
+                    <td><strong>#{log.id}</strong></td>
+                    <td>
+                      <div>
+                        <strong>Point:</strong> {log.discussion_point}
+                      </div>
+                      <div style={{ marginTop: '8px', paddingLeft: '8px', borderLeft: '2px solid var(--primary)' }}>
+                        <strong>Action:</strong> {log.action_description}
+                      </div>
+                    </td>
+                    <td>
+                      <span className="badge badge-open" style={{ backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid var(--border)' }}>
+                        {log.category}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={getPriorityBadgeClass(log.priority)}>{log.priority}</span>
+                    </td>
+                    <td>
+                      <div><strong>{log.contact_person}</strong></div>
+                      {log.contact_email && (
+                        <div style={{ marginTop: '4px', fontSize: '0.8rem' }}>
+                          <span style={{ color: 'var(--text-muted)' }}>{log.contact_email}</span>
+                          <br />
+                          <a
+                            href={mailUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              marginTop: '4px',
+                              color: 'var(--primary)',
+                              fontWeight: '600',
+                              textDecoration: 'none'
+                            }}
+                          >
+                            📧 Mail (Gmail)
+                          </a>
+                        </div>
+                      )}
+                    </td>
+                    
+                    {/* Owner Remarks Column */}
+                    <td>
+                      {isEditing ? (
+                        <textarea
+                          value={editOwnerRemarks}
+                          onChange={(e) => setEditOwnerRemarks(e.target.value)}
+                          rows="3"
+                          style={{ minWidth: '150px' }}
+                          placeholder="Action owner comments..."
+                        />
+                      ) : (
+                        <div>
+                          <p style={{ textAlign: 'left', margin: 0, color: 'var(--text-main)', fontSize: '0.85rem' }}>
+                            {log.owner_remarks || <em>No remarks</em>}
+                          </p>
+                          {log.owner_remarks_date && (
+                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                              Updated: {log.owner_remarks_date}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </td>
 
-      {/* Two forms side by side */}
-      <div className="flex-row" style={{ marginTop: '40px' }}>
-        {/* Add Discussion Card */}
-        <div className="card">
-          <h3 style={{ border: 'none', padding: '0', marginBottom: '15px' }}>+ Add Discussion Point</h3>
-          <form onSubmit={handleAddDiscussion}>
-            <div style={{ marginBottom: '15px' }}>
-              <label>Discussion Point Description</label>
+                    {/* HR Remarks Column */}
+                    <td>
+                      {isEditing ? (
+                        <textarea
+                          value={editHrRemarks}
+                          onChange={(e) => setEditHrRemarks(e.target.value)}
+                          rows="3"
+                          style={{ minWidth: '150px' }}
+                          placeholder="HR follow-up comments..."
+                        />
+                      ) : (
+                        <div>
+                          <p style={{ textAlign: 'left', margin: 0, color: 'var(--text-main)', fontSize: '0.85rem' }}>
+                            {log.hr_remarks || <em>No remarks</em>}
+                          </p>
+                          {log.hr_remarks_date && (
+                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                              Updated: {log.hr_remarks_date}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Action buttons cell */}
+                    <td style={{ textAlign: 'right' }}>
+                      {isEditing ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                          <button
+                            onClick={() => handleSaveRemarks(log.id)}
+                            disabled={saveLoading}
+                            style={{ padding: '6px 10px', fontSize: '0.75rem' }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={cancelEditing}
+                            className="btn-secondary"
+                            style={{ padding: '6px 10px', fontSize: '0.75rem' }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => startEditing(log)}
+                          className="btn-secondary"
+                          style={{ padding: '6px 12px', fontSize: '0.75rem' }}
+                        >
+                          Update Remarks
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Log Form Box */}
+      <div className="card" style={{ width: '100%', maxWidth: '850px', marginTop: '30px' }}>
+        <h3 style={{ border: 'none', padding: '0', marginBottom: '15px' }}>+ Log Discussion Point & Action Item</h3>
+        <form onSubmit={handleAddLogEntry}>
+          <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+            <div style={{ flex: 2, minWidth: '300px' }}>
+              <label>Discussion Point *</label>
               <textarea
-                placeholder="Type the feedback, concern, or point raised..."
+                placeholder="What feedback or concern was raised by the employee?"
                 value={discussionPoint}
                 onChange={(e) => setDiscussionPoint(e.target.value)}
                 required
                 rows="3"
               />
             </div>
-            <div style={{ display: 'flex', gap: '15px', marginBottom: '20px' }}>
-              <div style={{ flex: 1 }}>
-                <label>Category</label>
-                <select value={category} onChange={(e) => setCategory(e.target.value)}>
-                  <option value="Facility">Facility</option>
-                  <option value="Learning">Learning</option>
-                  <option value="Admin">Admin</option>
-                  <option value="Safety">Safety</option>
-                </select>
-              </div>
-              <div style={{ flex: 1 }}>
-                <label>Priority</label>
-                <select value={priority} onChange={(e) => setPriority(e.target.value)}>
-                  <option value="High">High</option>
-                  <option value="Medium">Medium</option>
-                  <option value="Low">Low</option>
-                </select>
-              </div>
-            </div>
-            <button type="submit" disabled={discussionLoading} style={{ width: '100%' }}>
-              {discussionLoading ? 'Saving...' : 'Save Discussion Point'}
-            </button>
-          </form>
-        </div>
-
-        {/* Add Action Card */}
-        <div className="card">
-          <h3 style={{ border: 'none', padding: '0', marginBottom: '15px' }}>+ Assign Action Item</h3>
-          <form onSubmit={handleAddAction}>
-            <div style={{ marginBottom: '15px' }}>
-              <label>Task Description</label>
+            <div style={{ flex: 2, minWidth: '300px' }}>
+              <label>Action Item / Follow-up *</label>
               <textarea
-                placeholder="What needs to be done for follow-up?"
+                placeholder="What task was assigned or needs follow-up?"
                 value={actionDesc}
                 onChange={(e) => setActionDesc(e.target.value)}
                 required
                 rows="3"
               />
             </div>
-            <div style={{ display: 'flex', gap: '15px', marginBottom: '20px' }}>
-              <div style={{ flex: 1 }}>
-                <label>Assignee (Owner)</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Rahul Sharma"
-                  value={owner}
-                  onChange={(e) => setOwner(e.target.value)}
-                  required
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label>Target Date</label>
-                <input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  required
-                />
-              </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap', marginTop: '15px' }}>
+            <div style={{ flex: 1, minWidth: '150px' }}>
+              <label>Category *</label>
+              <input
+                type="text"
+                placeholder="e.g. Facility, Safety, Admin"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                required
+              />
             </div>
-            <button type="submit" disabled={actionLoading} style={{ width: '100%' }}>
-              {actionLoading ? 'Assigning...' : 'Assign Action Item'}
-            </button>
-          </form>
-        </div>
-      </div>
-
-      <br /><hr /><br />
-
-      {/* AI Features section */}
-      <div className="card ai-section">
-        <h2 style={{ border: 'none', padding: '0', marginTop: '0', marginBottom: '10px' }}>🤖 Local AI Companion</h2>
-        <p style={{ fontSize: '0.9rem', marginBottom: '24px' }}>Processes raw notes on secure local networks to compile summaries and minutes.</p>
-
-        <div className="flex-row">
-          {/* Minutes Of Meeting column */}
-          <div>
-            <button onClick={handleGenerateMOM} disabled={momLoading} style={{ width: '100%', marginBottom: '15px' }}>
-              {momLoading ? 'Writing Minutes of Meeting...' : '✍️ Generate MOM Document'}
-            </button>
-            {momText && (
-              <div className="ai-output-container">
-                <h4 style={{ marginBottom: '8px' }}>Minutes of Meeting:</h4>
-                <pre style={{ whiteSpace: 'pre-wrap' }}>{momText}</pre>
-              </div>
-            )}
+            <div style={{ flex: 1, minWidth: '150px' }}>
+              <label>Priority</label>
+              <select value={priority} onChange={(e) => setPriority(e.target.value)}>
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+              </select>
+            </div>
+            <div style={{ flex: 1, minWidth: '150px' }}>
+              <label>Person to Contact *</label>
+              <input
+                type="text"
+                placeholder="e.g. Rahul Sharma"
+                value={contactPerson}
+                onChange={(e) => setContactPerson(e.target.value)}
+                required
+              />
+            </div>
+            <div style={{ flex: 1, minWidth: '200px' }}>
+              <label>Contact Email (Optional)</label>
+              <input
+                type="text"
+                placeholder="e.g. rahul@company.com"
+                value={contactEmail}
+                onChange={(e) => setContactEmail(e.target.value)}
+              />
+            </div>
           </div>
 
-          {/* Quick Summary column */}
-          <div>
-            <button onClick={handleGenerateSummary} disabled={summaryLoading} style={{ width: '100%', marginBottom: '15px' }} className="btn-secondary">
-              {summaryLoading ? 'Synthesizing...' : '📊 Generate Core Summary'}
-            </button>
-            {summary && (
-              <div className="ai-output-container" style={{ borderColor: 'var(--success)' }}>
-                <h4 style={{ marginBottom: '8px' }}>Executive Summary:</h4>
-                
-                <p style={{ color: '#fff', fontSize: '0.85rem', marginBottom: '5px', fontWeight: 'bold' }}>Top Concerns:</p>
-                <pre style={{ whiteSpace: 'pre-wrap', marginBottom: '12px', fontSize: '0.8rem' }}>{summary.concerns}</pre>
-
-                <p style={{ color: '#fff', fontSize: '0.85rem', marginBottom: '5px', fontWeight: 'bold' }}>Positive Feedback:</p>
-                <pre style={{ whiteSpace: 'pre-wrap', marginBottom: '12px', fontSize: '0.8rem' }}>{summary.feedback}</pre>
-
-                <p style={{ color: '#fff', fontSize: '0.85rem', marginBottom: '5px', fontWeight: 'bold' }}>Open Action Items:</p>
-                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.8rem' }}>{summary.actions}</pre>
-              </div>
-            )}
-          </div>
-        </div>
+          <button type="submit" disabled={formLoading} style={{ width: '100%', marginTop: '25px' }}>
+            {formLoading ? 'Adding Log Entry...' : 'Save Log Entry'}
+          </button>
+        </form>
       </div>
     </div>
   );
