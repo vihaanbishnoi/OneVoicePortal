@@ -2,10 +2,11 @@ import os
 import sqlite3
 import json
 import io
+import zipfile
+from xml.sax.saxutils import escape
 from datetime import datetime
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-import pandas as pd
 
 app = Flask(__name__)
 CORS(app)
@@ -56,6 +57,35 @@ def init_db():
                 FOREIGN KEY (meeting_id) REFERENCES meetings (id) ON DELETE CASCADE
             )
         ''')
+
+        # Keep every owner/HR response instead of only the latest value.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS remark_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                log_id INTEGER NOT NULL,
+                author_type TEXT NOT NULL,
+                remark TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (log_id) REFERENCES meeting_logs (id) ON DELETE CASCADE
+            )
+        ''')
+        # Seed history once for remarks saved before conversation tracking existed.
+        cursor.execute('''
+            INSERT INTO remark_history (log_id, author_type, remark, created_at)
+            SELECT l.id, 'Action Owner', l.owner_remarks,
+                   COALESCE(NULLIF(l.owner_remarks_date, ''), 'Imported from existing record')
+            FROM meeting_logs l
+            WHERE l.owner_remarks <> ''
+              AND NOT EXISTS (SELECT 1 FROM remark_history h WHERE h.log_id = l.id AND h.author_type = 'Action Owner')
+        ''')
+        cursor.execute('''
+            INSERT INTO remark_history (log_id, author_type, remark, created_at)
+            SELECT l.id, 'HR', l.hr_remarks,
+                   COALESCE(NULLIF(l.hr_remarks_date, ''), 'Imported from existing record')
+            FROM meeting_logs l
+            WHERE l.hr_remarks <> ''
+              AND NOT EXISTS (SELECT 1 FROM remark_history h WHERE h.log_id = l.id AND h.author_type = 'HR')
+        ''')
         conn.commit()
 
 # Initialize DB on import/startup
@@ -84,6 +114,12 @@ def create_meeting():
     
     if not (forum_type and date and department and facilitator and num_participants is not None):
         return jsonify({'error': 'Missing required fields'}), 400
+
+    if not isinstance(participants_list, list) or any(
+        not isinstance(p, dict) or not (str(p.get('name', '')).strip() or str(p.get('empid', '')).strip())
+        for p in participants_list
+    ):
+        return jsonify({'error': 'Each participant needs either a name or an employee ID'}), 400
         
     participants_str = json.dumps(participants_list)
     
@@ -149,6 +185,24 @@ def get_meeting(meeting_id):
         meeting['logs'] = [dict(row) for row in log_rows]
         
     return jsonify(meeting)
+
+# Get one uncluttered discussion/action detail, including its full conversation.
+@app.route('/api/logs/<int:log_id>', methods=['GET'])
+def get_log(log_id):
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT l.*, m.forum_type, m.date AS meeting_date, m.department
+            FROM meeting_logs l JOIN meetings m ON m.id = l.meeting_id
+            WHERE l.id = ?
+        ''', (log_id,))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'error': 'Log entry not found'}), 404
+        result = dict(row)
+        cursor.execute('SELECT * FROM remark_history WHERE log_id = ? ORDER BY id', (log_id,))
+        result['history'] = [dict(item) for item in cursor.fetchall()]
+    return jsonify(result)
 
 # Add a combined discussion-action log item to a meeting
 @app.route('/api/meetings/<int:meeting_id>/logs', methods=['POST'])
@@ -226,8 +280,9 @@ def update_remarks(log_id):
     
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT id FROM meeting_logs WHERE id = ?', (log_id,))
-        if not cursor.fetchone():
+        cursor.execute('SELECT * FROM meeting_logs WHERE id = ?', (log_id,))
+        existing = cursor.fetchone()
+        if not existing:
             return jsonify({'error': 'Log entry not found'}), 404
             
         cursor.execute(f'''
@@ -235,6 +290,13 @@ def update_remarks(log_id):
             SET {", ".join(update_fields)}
             WHERE id = ?
         ''', params)
+
+        if owner_remarks is not None and owner_remarks.strip() and owner_remarks != existing['owner_remarks']:
+            cursor.execute('INSERT INTO remark_history (log_id, author_type, remark, created_at) VALUES (?, ?, ?, ?)',
+                           (log_id, 'Action Owner', owner_remarks.strip(), current_time))
+        if hr_remarks is not None and hr_remarks.strip() and hr_remarks != existing['hr_remarks']:
+            cursor.execute('INSERT INTO remark_history (log_id, author_type, remark, created_at) VALUES (?, ?, ?, ?)',
+                           (log_id, 'HR', hr_remarks.strip(), current_time))
         conn.commit()
         
         # Get updated row
@@ -285,21 +347,90 @@ def reports_search():
             
     return jsonify(meetings)
 
-# Export the entire database as a multi-sheet Excel file
+def _excel_column(number):
+    result = ''
+    while number:
+        number, remainder = divmod(number - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+
+def _make_xlsx(headers, rows):
+    """Build a small, valid XLSX with the standard library (no openpyxl dependency)."""
+    def cell(reference, value, style=''):
+        safe = escape('' if value is None else str(value)).replace('\n', '&#10;')
+        style_attr = f' s="{style}"' if style else ''
+        return f'<c r="{reference}" t="inlineStr"{style_attr}><is><t xml:space="preserve">{safe}</t></is></c>'
+
+    sheet_rows = []
+    for row_number, values in enumerate([headers] + rows, 1):
+        cells = ''.join(cell(f'{_excel_column(i)}{row_number}', value, '1' if row_number == 1 else '')
+                        for i, value in enumerate(values, 1))
+        sheet_rows.append(f'<row r="{row_number}">{cells}</row>')
+    last_column = _excel_column(max(1, len(headers)))
+    sheet = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+             '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+             f'<dimension ref="A1:{last_column}{max(1, len(rows) + 1)}"/>'
+             '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
+             f'<sheetData>{"".join(sheet_rows)}</sheetData><autoFilter ref="A1:{last_column}{max(1, len(rows) + 1)}"/></worksheet>')
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>')
+        archive.writestr('_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+        archive.writestr('xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Meetings" sheetId="1" r:id="rId1"/></sheets></workbook>')
+        archive.writestr('xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')
+        archive.writestr('xl/styles.xml', '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font/><font><b/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="2"><xf fontId="0" fillId="0" borderId="0" xfId="0"/><xf fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>')
+        archive.writestr('xl/worksheets/sheet1.xml', sheet)
+    output.seek(0)
+    return output
+
+
+# Export one row per meeting; repeated points and conversation become numbered columns.
 @app.route('/api/reports/export', methods=['GET'])
 def export_db():
     try:
         with get_db() as conn:
-            df_meetings = pd.read_sql_query("SELECT * FROM meetings", conn)
-            df_logs = pd.read_sql_query("SELECT * FROM meeting_logs", conn)
-            
-        # Create buffer
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_meetings.to_excel(writer, sheet_name='Meetings', index=False)
-            df_logs.to_excel(writer, sheet_name='Meeting Logs', index=False)
-            
-        output.seek(0)
+            meetings = conn.execute('SELECT * FROM meetings ORDER BY date DESC, id DESC').fetchall()
+            records = []
+            max_logs = 0
+            max_history = {}
+            for meeting in meetings:
+                logs = []
+                for log in conn.execute('SELECT * FROM meeting_logs WHERE meeting_id = ? ORDER BY id', (meeting['id'],)).fetchall():
+                    item = dict(log)
+                    item['history'] = [dict(h) for h in conn.execute('SELECT * FROM remark_history WHERE log_id = ? ORDER BY id', (log['id'],)).fetchall()]
+                    logs.append(item)
+                max_logs = max(max_logs, len(logs))
+                for index, log in enumerate(logs, 1):
+                    max_history[index] = max(max_history.get(index, 0), len(log['history']))
+                records.append((dict(meeting), logs))
+
+        headers = ['Meeting ID', 'Forum Type', 'Date', 'Department / Unit', 'Facilitator', 'Number of Participants', 'Participants (Name / Employee ID)']
+        log_fields = ['Discussion Point', 'Action Item / Follow-up', 'Category', 'Priority', 'Person to Contact']
+        for index in range(1, max_logs + 1):
+            headers.extend([f'Point {index} - {field}' for field in log_fields])
+            for history_index in range(1, max_history.get(index, 0) + 1):
+                headers.extend([f'Point {index} - Update {history_index} Author', f'Point {index} - Update {history_index} Remark', f'Point {index} - Update {history_index} Date'])
+
+        rows = []
+        for meeting, logs in records:
+            try:
+                participants = json.loads(meeting.get('participants_list') or '[]')
+            except (TypeError, json.JSONDecodeError):
+                participants = []
+            participant_text = '; '.join(f"{p.get('name') or '(no name)'} / {p.get('empid') or '(no ID)'}" for p in participants)
+            row = [meeting['id'], meeting['forum_type'], meeting['date'], meeting['department'], meeting['facilitator'], meeting['num_participants'], participant_text]
+            for index in range(1, max_logs + 1):
+                log = logs[index - 1] if index <= len(logs) else None
+                if log:
+                    row.extend([log['discussion_point'], log['action_description'], log['category'], log['priority'], log['contact_person']])
+                    for history_index in range(max_history.get(index, 0)):
+                        history = log['history'][history_index] if history_index < len(log['history']) else None
+                        row.extend([history['author_type'], history['remark'], history['created_at']] if history else ['', '', ''])
+                else:
+                    row.extend([''] * (len(log_fields) + 3 * max_history.get(index, 0)))
+            rows.append(row)
+        output = _make_xlsx(headers, rows)
         return send_file(
             output,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

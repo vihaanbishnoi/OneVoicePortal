@@ -12,6 +12,12 @@ export async function fetchMeeting(id) {
   return res.json();
 }
 
+export async function fetchMeetingLog(id) {
+  const res = await fetch(`${API_BASE}/logs/${id}`);
+  if (!res.ok) throw new Error('Failed to fetch discussion/action details');
+  return res.json();
+}
+
 export async function createMeeting(data) {
   const res = await fetch(`${API_BASE}/meetings`, {
     method: 'POST',

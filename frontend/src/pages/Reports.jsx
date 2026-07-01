@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { searchReports } from '../api';
 
@@ -47,7 +47,7 @@ export default function Reports() {
       <div className="card" style={{ width: '100%', maxWidth: '800px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'var(--primary-light)', borderColor: 'rgba(79, 70, 229, 0.2)', marginBottom: '30px' }}>
         <div style={{ textAlign: 'left' }}>
           <h3 style={{ margin: 0, color: 'var(--primary)' }}>Export Database</h3>
-          <p style={{ margin: '4px 0 0 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>Get a copy of the entire SQLite database tables (meetings, logs) formatted into a multi-sheet Excel file.</p>
+          <p style={{ margin: '4px 0 0 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>One row per meeting, with every discussion, action and follow-up conversation in numbered columns.</p>
         </div>
         <button onClick={handleDownloadDB} style={{ whiteSpace: 'nowrap' }}>
           📥 Download Excel Sheet

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { createMeeting } from '../api';
 
@@ -34,6 +34,10 @@ export default function NewMeeting() {
     e.preventDefault();
     if (!date || !department || !facilitator || !numParticipants) {
       setError('Please fill in all fields.');
+      return;
+    }
+    if (showParticipantDetails && participants.some(p => !p.name.trim() && !p.empid.trim())) {
+      setError('For each participant, enter either a name or an Employee ID. Both are not required.');
       return;
     }
     setError('');
@@ -125,13 +129,14 @@ export default function NewMeeting() {
                 style={{ width: 'auto', cursor: 'pointer' }}
               />
               <label htmlFor="showDetails" style={{ margin: 0, cursor: 'pointer', userSelect: 'none' }}>
-                Add names and Employee IDs of the members
+                Add participants by name or Employee ID (either one is enough)
               </label>
             </div>
 
             {showParticipantDetails && (
               <div style={{ marginTop: '20px' }}>
-                <h4 style={{ fontSize: '0.9rem', marginBottom: '10px', color: 'var(--text-main)' }}>Participant Registry</h4>
+                <h4 style={{ fontSize: '0.9rem', marginBottom: '4px', color: 'var(--text-main)' }}>Participant Registry</h4>
+                <p style={{ textAlign: 'left', fontSize: '0.8rem', marginBottom: '12px' }}>Enter a name, an Employee ID, or both.</p>
                 {participants.map((p, idx) => (
                   <div key={idx} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'center' }}>
                     <input
