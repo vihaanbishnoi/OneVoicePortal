@@ -1,46 +1,56 @@
 # OneVoice Portal
 
-OneVoice Portal is a lightweight meeting companion for recording meetings, tracking discussion points and action items, capturing follow-up remarks, and exporting records for reporting.
+OneVoice Portal is a meeting-management web app for recording employee forums,
+capturing the discussion, assigning follow-up actions, and keeping everyone
+updated on progress.
 
-The project has a React frontend and a Flask REST API backed by SQLite.
+**Live demo:** [Open OneVoice Portal](https://onevoiceportal.onrender.com/)
 
-## Features
+Instead of relying on separate notes, spreadsheets, and message threads, a
+meeting and its action items are kept together in one place. Teams can revisit
+past meetings, search records, add follow-up remarks, and export their data to
+Excel when needed.
 
-- Create meeting records with forum details and participant information.
-- Add discussion points, categories, priorities, action items, and action owners.
-- Keep a chronological history of action-owner and HR remarks.
-- Browse meeting and action-item details in the web interface.
-- Search meetings by forum type and date range.
-- Export all stored meeting data to an Excel workbook.
+## What you can do
 
-## Tech stack
+- Log a meeting with its forum type, date, department, facilitator, and participants.
+- Record discussion points, priority, category, action item, and action owner.
+- View previous meetings and drill into each action item.
+- Add and review a chronological history of HR and action-owner remarks.
+- Search meeting records by forum type and date range.
+- Export all meeting information to an Excel workbook.
 
-- Frontend: React 19, Vite, React Router
-- Backend: Python, Flask, Flask-CORS
-- Database: SQLite
+## How it works
 
-## Project structure
+The application has two parts:
 
-```text
-.
-|-- backend/
-|   `-- app.py              # Flask API and SQLite data access
-|-- frontend/
-|   |-- src/                # React application
-|   `-- package.json        # Frontend scripts and dependencies
-`-- requirements.txt        # Python dependencies
-```
+- A React web interface where users create and review meeting records.
+- A Flask API that stores those records in a local SQLite database.
+
+When you run the project locally, both parts need to be running: the frontend
+opens in your browser and communicates with the backend API in the background.
 
 ## Run locally
 
-### Prerequisites
+### Before you start
 
-- Python 3.10 or later
-- Node.js 20 or later
+Install the following on your computer:
 
-### 1. Start the API
+- Python 3.10 or newer
+- Node.js 20 or newer
 
-From the repository root, create and activate a virtual environment (recommended), then install dependencies:
+### 1. Download the project
+
+Clone the repository and open its folder in PowerShell:
+
+```powershell
+git clone https://github.com/vihaanbishnoi/OneVoicePortal.git
+cd OneVoicePortal
+```
+
+### 2. Start the backend
+
+In the project folder, run:
 
 ```powershell
 python -m venv .venv
@@ -49,11 +59,12 @@ pip install -r requirements.txt
 python backend\app.py
 ```
 
-The API runs at `http://localhost:5000`. On first start, it creates `backend/database.db` automatically.
+Keep this terminal open. The backend will run at `http://localhost:5000` and
+will create the local database automatically the first time it starts.
 
-### 2. Start the frontend
+### 3. Start the frontend
 
-Open a second terminal:
+Open a second PowerShell terminal in the same project folder and run:
 
 ```powershell
 cd frontend
@@ -61,43 +72,34 @@ npm install
 npm run dev
 ```
 
-Open the URL Vite prints in the terminal, normally `http://localhost:5173`.
+Open the link displayed in the terminal, usually `http://localhost:5173`.
+You can now create and manage meetings locally.
 
-### Configure the API target
-
-The frontend uses `http://localhost:5000/api` during local development and
-falls back to the deployed Render API in production. To override either target,
-set `VITE_API_BASE_URL` before building the frontend.
-
-For the deployed static site, configure this Render environment variable and
-redeploy:
+## Project structure
 
 ```text
-VITE_API_BASE_URL=https://onevoice-api-89c5.onrender.com/api
+.
+|-- backend/
+|   `-- app.py              # Flask API and database logic
+|-- frontend/
+|   |-- src/                # React pages and user interface
+|   `-- package.json        # Frontend dependencies and scripts
+`-- requirements.txt        # Python dependencies
 ```
 
-Use `frontend/.env.example` as the local configuration reference. Keep actual
-`.env` files out of Git.
+## Technology used
 
-## API overview
+- **Frontend:** React, Vite, React Router
+- **Backend:** Python, Flask, Flask-CORS
+- **Database:** SQLite
 
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| `GET` | `/` | API health response |
-| `GET`, `POST` | `/api/meetings` | List or create meetings |
-| `GET` | `/api/meetings/:id` | Retrieve a meeting and its logs |
-| `POST` | `/api/meetings/:id/logs` | Add a discussion/action log |
-| `GET`, `PATCH` | `/api/logs/:id` | Retrieve a log or add remarks |
-| `GET` | `/api/reports/search` | Filter meetings by category and date range |
-| `GET` | `/api/reports/export` | Download all records as an Excel workbook |
+## Useful frontend commands
 
-## Available scripts
-
-Run these from `frontend/`:
+Run these from the `frontend` folder:
 
 ```powershell
-npm run dev      # Start the Vite development server
-npm run build    # Build the frontend for production
-npm run lint     # Lint frontend source files
-npm run preview  # Preview a production build
+npm run dev      # Start the local development site
+npm run build    # Create a production build
+npm run lint     # Check the frontend code for common issues
+npm run preview  # Preview a production build locally
 ```
