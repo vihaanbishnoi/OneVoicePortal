@@ -63,6 +63,19 @@ npm run dev
 
 Open the URL Vite prints in the terminal, normally `http://localhost:5173`.
 
+### Configure the API target
+
+The frontend uses `http://localhost:5000/api` by default for local development.
+To target a deployed API, set `VITE_API_BASE_URL` before building the frontend.
+For Render, add this environment variable to the static site and redeploy:
+
+```text
+VITE_API_BASE_URL=https://onevoice-api.onrender.com/api
+```
+
+Use `frontend/.env.example` as the local configuration reference. Keep actual
+`.env` files out of Git.
+
 ## API overview
 
 | Method | Endpoint | Description |
