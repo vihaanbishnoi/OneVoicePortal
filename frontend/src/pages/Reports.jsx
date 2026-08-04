@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { searchReports } from '../api';
+import { searchReports, exportDatabaseUrl } from '../api';
 
 export default function Reports() {
   const [category, setCategory] = useState('');
@@ -29,7 +29,7 @@ export default function Reports() {
 
   const handleDownloadDB = () => {
     // Navigate the browser window to start the direct excel spreadsheet download
-    window.location.href = "http://localhost:5000/api/reports/export";
+    window.location.href = exportDatabaseUrl();
   };
 
   return (

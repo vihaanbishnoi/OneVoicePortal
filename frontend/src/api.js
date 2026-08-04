@@ -60,6 +60,6 @@ export async function searchReports(params = {}) {
   return res.json();
 }
 
-export async function exportDatabaseUrl() {
+export function exportDatabaseUrl() {
   return `${API_BASE}/reports/export`;
 }
