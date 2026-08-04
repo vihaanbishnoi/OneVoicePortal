@@ -65,12 +65,15 @@ Open the URL Vite prints in the terminal, normally `http://localhost:5173`.
 
 ### Configure the API target
 
-The frontend uses `http://localhost:5000/api` by default for local development.
-To target a deployed API, set `VITE_API_BASE_URL` before building the frontend.
-For Render, add this environment variable to the static site and redeploy:
+The frontend uses `http://localhost:5000/api` during local development and
+falls back to the deployed Render API in production. To override either target,
+set `VITE_API_BASE_URL` before building the frontend.
+
+For the deployed static site, configure this Render environment variable and
+redeploy:
 
 ```text
-VITE_API_BASE_URL=https://onevoice-api.onrender.com/api
+VITE_API_BASE_URL=https://onevoice-api-89c5.onrender.com/api
 ```
 
 Use `frontend/.env.example` as the local configuration reference. Keep actual
@@ -87,10 +90,6 @@ Use `frontend/.env.example` as the local configuration reference. Keep actual
 | `GET`, `PATCH` | `/api/logs/:id` | Retrieve a log or add remarks |
 | `GET` | `/api/reports/search` | Filter meetings by category and date range |
 | `GET` | `/api/reports/export` | Download all records as an Excel workbook |
-
-## Data and privacy
-
-Local data is stored in `backend/database.db`; it is intentionally ignored by Git. Do not commit real meeting records, credentials, or `.env` files.
 
 ## Available scripts
 
