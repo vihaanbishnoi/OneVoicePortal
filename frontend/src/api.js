@@ -1,4 +1,9 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+const LOCAL_API_BASE_URL = 'http://localhost:5000/api';
+const LIVE_API_BASE_URL = 'https://onevoice-api-89c5.onrender.com/api';
+
+const API_BASE = import.meta.env.DEV
+  ? import.meta.env.VITE_API_BASE_URL || LOCAL_API_BASE_URL
+  : import.meta.env.VITE_API_BASE_URL || LIVE_API_BASE_URL;
 
 export async function fetchMeetings() {
   const res = await fetch(`${API_BASE}/meetings`);
