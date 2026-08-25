@@ -1,445 +1,169 @@
-import os
-import sqlite3
-import json
-import io
-import zipfile
-from xml.sax.saxutils import escape
-from datetime import datetime
-from flask import Flask, request, jsonify, send_file
+"""Secure PostgreSQL API for OneVoice."""
+import json, os
+from datetime import date, datetime, timedelta, timezone
+from functools import wraps
+from flask import Flask, jsonify, request
 from flask_cors import CORS
+from dotenv import load_dotenv
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, create_engine, func, or_
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
+from werkzeug.security import check_password_hash, generate_password_hash
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
-app = Flask(__name__)
-CORS(app)
+load_dotenv()
+DATABASE_URL=os.getenv("DATABASE_URL"); SECRET_KEY=os.getenv("SECRET_KEY")
+if not DATABASE_URL or not SECRET_KEY: raise RuntimeError("Set DATABASE_URL (PostgreSQL) and SECRET_KEY. SQLite is not supported.")
+app=Flask(__name__); CORS(app); engine=create_engine(DATABASE_URL,pool_pre_ping=True); DB=sessionmaker(bind=engine,expire_on_commit=False); signer=URLSafeTimedSerializer(SECRET_KEY,salt="onevoice")
+class Base(DeclarativeBase): pass
+class User(Base):
+ __tablename__="users"; id:Mapped[int]=mapped_column(primary_key=True); name:Mapped[str]=mapped_column(String(120)); email:Mapped[str]=mapped_column(String(255),unique=True); password_hash:Mapped[str]=mapped_column(String(255)); role:Mapped[str]=mapped_column(String(30),default="action_owner"); active:Mapped[bool]=mapped_column(Boolean,default=True)
+class Meeting(Base):
+ __tablename__="meetings"; id:Mapped[int]=mapped_column(primary_key=True); forum_type:Mapped[str]=mapped_column(String(80)); date:Mapped[date]=mapped_column(Date); department:Mapped[str]=mapped_column(String(120)); facilitator:Mapped[str]=mapped_column(String(120)); num_participants:Mapped[int]=mapped_column(Integer); participants_list:Mapped[str]=mapped_column(Text,default="[]"); logs:Mapped[list["Action"]]=relationship(back_populates="meeting",cascade="all, delete-orphan")
+class Action(Base):
+ __tablename__="actions"; id:Mapped[int]=mapped_column(primary_key=True); meeting_id:Mapped[int]=mapped_column(ForeignKey("meetings.id",ondelete="CASCADE")); discussion_point:Mapped[str]=mapped_column(Text); category:Mapped[str]=mapped_column(String(120)); priority:Mapped[str]=mapped_column(String(20),default="Medium"); action_description:Mapped[str]=mapped_column(Text); contact_person:Mapped[str]=mapped_column(String(120)); contact_email:Mapped[str]=mapped_column(String(255),default=""); owner_id:Mapped[int|None]=mapped_column(ForeignKey("users.id")); status:Mapped[str]=mapped_column(String(30),default="Open"); due_date:Mapped[date|None]=mapped_column(Date); last_reminded_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True)); created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc)); updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc),onupdate=lambda:datetime.now(timezone.utc)); meeting:Mapped[Meeting]=relationship(back_populates="logs"); owner:Mapped[User|None]=relationship(); history:Mapped[list["Remark"]]=relationship(cascade="all, delete-orphan")
+class Remark(Base):
+ __tablename__="remarks"; id:Mapped[int]=mapped_column(primary_key=True); action_id:Mapped[int]=mapped_column(ForeignKey("actions.id",ondelete="CASCADE")); author:Mapped[str]=mapped_column(String(50)); remark:Mapped[str]=mapped_column(Text); created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+class Notification(Base):
+ __tablename__="notifications"; id:Mapped[int]=mapped_column(primary_key=True); user_id:Mapped[int|None]=mapped_column(ForeignKey("users.id")); action_id:Mapped[int|None]=mapped_column(ForeignKey("actions.id",ondelete="CASCADE")); title:Mapped[str]=mapped_column(String(180)); body:Mapped[str]=mapped_column(Text); read:Mapped[bool]=mapped_column(Boolean,default=False); created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+def iso(d): return d.isoformat() if d else None
+def user_json(u): return {"id":u.id,"name":u.name,"email":u.email,"role":u.role}
+def action_json(a,meeting=False):
+ r={"id":a.id,"meeting_id":a.meeting_id,"discussion_point":a.discussion_point,"category":a.category,"priority":a.priority,"action_description":a.action_description,"contact_person":a.contact_person,"contact_email":a.contact_email,"owner_id":a.owner_id,"owner_name":a.owner.name if a.owner else None,"status":a.status,"due_date":iso(a.due_date),"created_at":iso(a.created_at),"updated_at":iso(a.updated_at)}
+ if meeting:r["meeting"]={"id":a.meeting.id,"date":iso(a.meeting.date),"department":a.meeting.department,"forum_type":a.meeting.forum_type}
+ return r
+def meeting_json(m,detail=False):
+ r={"id":m.id,"forum_type":m.forum_type,"date":iso(m.date),"department":m.department,"facilitator":m.facilitator,"num_participants":m.num_participants,"participants_list":json.loads(m.participants_list or "[]")}
+ if detail:r["logs"]=[action_json(a) for a in m.logs]
+ return r
+def require(*roles):
+ def dec(fn):
+  @wraps(fn)
+  def wrapped(*args,**kwargs):
+   h=request.headers.get("Authorization","")
+   if not h.startswith("Bearer "):return jsonify(error="Authentication required"),401
+   try:p=signer.loads(h[7:],max_age=43200)
+   except (BadSignature,SignatureExpired):return jsonify(error="Session expired or invalid"),401
+   db=DB(); u=db.get(User,p.get("id")); db.close()
+   if not u or not u.active:return jsonify(error="Account unavailable"),401
+   if roles and u.role not in roles:return jsonify(error="Permission denied"),403
+   request.user=u; return fn(*args,**kwargs)
+  return wrapped
+ return dec
+def parsed(v): return date.fromisoformat(v) if v else None
+def allowed(a): return request.user.role in ("hr_admin","hr_team") or a.owner_id==request.user.id
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'database.db')
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def init_db():
-    with get_db() as conn:
-        cursor = conn.cursor()
-        
-        # Clean up legacy tables to avoid conflicts
-        cursor.execute("DROP TABLE IF EXISTS discussion_points")
-        cursor.execute("DROP TABLE IF EXISTS action_items")
-        
-        # Create meetings table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS meetings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                forum_type TEXT NOT NULL,
-                date TEXT NOT NULL,
-                department TEXT NOT NULL,
-                facilitator TEXT NOT NULL,
-                num_participants INTEGER NOT NULL,
-                participants_list TEXT
-            )
-        ''')
-        
-        # Create meeting_logs table (Combined 1:1 discussion & action)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS meeting_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                meeting_id INTEGER NOT NULL,
-                discussion_point TEXT NOT NULL,
-                category TEXT NOT NULL,
-                priority TEXT NOT NULL,
-                action_description TEXT NOT NULL,
-                contact_person TEXT NOT NULL,
-                contact_email TEXT NOT NULL,
-                owner_remarks TEXT DEFAULT '',
-                owner_remarks_date TEXT DEFAULT '',
-                hr_remarks TEXT DEFAULT '',
-                hr_remarks_date TEXT DEFAULT '',
-                FOREIGN KEY (meeting_id) REFERENCES meetings (id) ON DELETE CASCADE
-            )
-        ''')
-
-        # Keep every owner/HR response instead of only the latest value.
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS remark_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                log_id INTEGER NOT NULL,
-                author_type TEXT NOT NULL,
-                remark TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (log_id) REFERENCES meeting_logs (id) ON DELETE CASCADE
-            )
-        ''')
-        # Seed history once for remarks saved before conversation tracking existed.
-        cursor.execute('''
-            INSERT INTO remark_history (log_id, author_type, remark, created_at)
-            SELECT l.id, 'Action Owner', l.owner_remarks,
-                   COALESCE(NULLIF(l.owner_remarks_date, ''), 'Imported from existing record')
-            FROM meeting_logs l
-            WHERE l.owner_remarks <> ''
-              AND NOT EXISTS (SELECT 1 FROM remark_history h WHERE h.log_id = l.id AND h.author_type = 'Action Owner')
-        ''')
-        cursor.execute('''
-            INSERT INTO remark_history (log_id, author_type, remark, created_at)
-            SELECT l.id, 'HR', l.hr_remarks,
-                   COALESCE(NULLIF(l.hr_remarks_date, ''), 'Imported from existing record')
-            FROM meeting_logs l
-            WHERE l.hr_remarks <> ''
-              AND NOT EXISTS (SELECT 1 FROM remark_history h WHERE h.log_id = l.id AND h.author_type = 'HR')
-        ''')
-        conn.commit()
-
-# Initialize DB on import/startup
-init_db()
-
-# --- API Endpoints ---
-
-# Root Endpoint
-@app.route('/', methods=['GET'])
-def index():
-    return jsonify({
-        'status': 'healthy',
-        'message': 'OneVoice Portal REST API is running. Access the user interface via your React development server (usually at http://localhost:5173).'
-    })
-
-# Create new meeting
-@app.route('/api/meetings', methods=['POST'])
-def create_meeting():
-    data = request.json
-    forum_type = data.get('forum_type')
-    date = data.get('date')
-    department = data.get('department')
-    facilitator = data.get('facilitator')
-    num_participants = data.get('num_participants')
-    participants_list = data.get('participants_list', []) # optional list of {name, empid}
-    
-    if not (forum_type and date and department and facilitator and num_participants is not None):
-        return jsonify({'error': 'Missing required fields'}), 400
-
-    if not isinstance(participants_list, list) or any(
-        not isinstance(p, dict) or not (str(p.get('name', '')).strip() or str(p.get('empid', '')).strip())
-        for p in participants_list
-    ):
-        return jsonify({'error': 'Each participant needs either a name or an employee ID'}), 400
-        
-    participants_str = json.dumps(participants_list)
-    
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO meetings (forum_type, date, department, facilitator, num_participants, participants_list)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (forum_type, date, department, facilitator, num_participants, participants_str))
-        meeting_id = cursor.lastrowid
-        conn.commit()
-        
-    return jsonify({
-        'id': meeting_id,
-        'forum_type': forum_type,
-        'date': date,
-        'department': department,
-        'facilitator': facilitator,
-        'num_participants': num_participants,
-        'participants_list': participants_list
-    }), 201
-
-# List all meetings
-@app.route('/api/meetings', methods=['GET'])
-def list_meetings():
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM meetings ORDER BY date DESC, id DESC')
-        rows = cursor.fetchall()
-        
-    meetings = []
-    for row in rows:
-        meeting_dict = dict(row)
-        try:
-            meeting_dict['participants_list'] = json.loads(row['participants_list']) if row['participants_list'] else []
-        except Exception:
-            meeting_dict['participants_list'] = []
-        meetings.append(meeting_dict)
-        
-    return jsonify(meetings)
-
-# Get one meeting + combined logs
-@app.route('/api/meetings/<int:meeting_id>', methods=['GET'])
-def get_meeting(meeting_id):
-    with get_db() as conn:
-        cursor = conn.cursor()
-        
-        # Get meeting details
-        cursor.execute('SELECT * FROM meetings WHERE id = ?', (meeting_id,))
-        meeting_row = cursor.fetchone()
-        if not meeting_row:
-            return jsonify({'error': 'Meeting not found'}), 404
-            
-        meeting = dict(meeting_row)
-        try:
-            meeting['participants_list'] = json.loads(meeting_row['participants_list']) if meeting_row['participants_list'] else []
-        except Exception:
-            meeting['participants_list'] = []
-        
-        # Get combined logs
-        cursor.execute('SELECT * FROM meeting_logs WHERE meeting_id = ? ORDER BY id ASC', (meeting_id,))
-        log_rows = cursor.fetchall()
-        meeting['logs'] = [dict(row) for row in log_rows]
-        
-    return jsonify(meeting)
-
-# Get one uncluttered discussion/action detail, including its full conversation.
-@app.route('/api/logs/<int:log_id>', methods=['GET'])
-def get_log(log_id):
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT l.*, m.forum_type, m.date AS meeting_date, m.department
-            FROM meeting_logs l JOIN meetings m ON m.id = l.meeting_id
-            WHERE l.id = ?
-        ''', (log_id,))
-        row = cursor.fetchone()
-        if not row:
-            return jsonify({'error': 'Log entry not found'}), 404
-        result = dict(row)
-        cursor.execute('SELECT * FROM remark_history WHERE log_id = ? ORDER BY id', (log_id,))
-        result['history'] = [dict(item) for item in cursor.fetchall()]
-    return jsonify(result)
-
-# Add a combined discussion-action log item to a meeting
-@app.route('/api/meetings/<int:meeting_id>/logs', methods=['POST'])
-def add_meeting_log(meeting_id):
-    data = request.json
-    discussion_point = data.get('discussion_point')
-    category = data.get('category')
-    priority = data.get('priority')
-    action_description = data.get('action_description')
-    contact_person = data.get('contact_person')
-    contact_email = data.get('contact_email', '')
-    
-    if not (discussion_point and category and priority and action_description and contact_person):
-        return jsonify({'error': 'Missing required fields'}), 400
-        
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT id FROM meetings WHERE id = ?', (meeting_id,))
-        if not cursor.fetchone():
-            return jsonify({'error': 'Meeting not found'}), 404
-            
-        cursor.execute('''
-            INSERT INTO meeting_logs (
-                meeting_id, discussion_point, category, priority, 
-                action_description, contact_person, contact_email
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (meeting_id, discussion_point, category, priority, action_description, contact_person, contact_email))
-        log_id = cursor.lastrowid
-        conn.commit()
-        
-    return jsonify({
-        'id': log_id,
-        'meeting_id': meeting_id,
-        'discussion_point': discussion_point,
-        'category': category,
-        'priority': priority,
-        'action_description': action_description,
-        'contact_person': contact_person,
-        'contact_email': contact_email,
-        'owner_remarks': '',
-        'owner_remarks_date': '',
-        'hr_remarks': '',
-        'hr_remarks_date': ''
-    }), 201
-
-# Update remarks for a log item
-@app.route('/api/logs/<int:log_id>', methods=['PATCH'])
-def update_remarks(log_id):
-    data = request.json
-    owner_remarks = data.get('owner_remarks')
-    hr_remarks = data.get('hr_remarks')
-    
-    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
-    update_fields = []
-    params = []
-    
-    if owner_remarks is not None:
-        update_fields.append("owner_remarks = ?")
-        params.append(owner_remarks)
-        update_fields.append("owner_remarks_date = ?")
-        params.append(current_time)
-        
-    if hr_remarks is not None:
-        update_fields.append("hr_remarks = ?")
-        params.append(hr_remarks)
-        update_fields.append("hr_remarks_date = ?")
-        params.append(current_time)
-        
-    if not update_fields:
-        return jsonify({'error': 'No remarks provided for update'}), 400
-        
-    params.append(log_id)
-    
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM meeting_logs WHERE id = ?', (log_id,))
-        existing = cursor.fetchone()
-        if not existing:
-            return jsonify({'error': 'Log entry not found'}), 404
-            
-        cursor.execute(f'''
-            UPDATE meeting_logs 
-            SET {", ".join(update_fields)}
-            WHERE id = ?
-        ''', params)
-
-        if owner_remarks is not None and owner_remarks.strip() and owner_remarks != existing['owner_remarks']:
-            cursor.execute('INSERT INTO remark_history (log_id, author_type, remark, created_at) VALUES (?, ?, ?, ?)',
-                           (log_id, 'Action Owner', owner_remarks.strip(), current_time))
-        if hr_remarks is not None and hr_remarks.strip() and hr_remarks != existing['hr_remarks']:
-            cursor.execute('INSERT INTO remark_history (log_id, author_type, remark, created_at) VALUES (?, ?, ?, ?)',
-                           (log_id, 'HR', hr_remarks.strip(), current_time))
-        conn.commit()
-        
-        # Get updated row
-        cursor.execute('SELECT * FROM meeting_logs WHERE id = ?', (log_id,))
-        updated_row = cursor.fetchone()
-        
-    return jsonify(dict(updated_row))
-
-# Advanced Search by Forum Type (Category) and Date range
-@app.route('/api/reports/search', methods=['GET'])
-def reports_search():
-    category = request.args.get('category')  # Maps to forum_type in meetings
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    
-    query = 'SELECT * FROM meetings WHERE 1=1'
-    params = []
-    
-    if category:
-        query += ' AND forum_type = ?'
-        params.append(category)
-    if start_date:
-        query += ' AND date >= ?'
-        params.append(start_date)
-    if end_date:
-        query += ' AND date <= ?'
-        params.append(end_date)
-        
-    query += ' ORDER BY date DESC, id DESC'
-    
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(query, params)
-        meeting_rows = cursor.fetchall()
-        
-        meetings = []
-        for m_row in meeting_rows:
-            m_dict = dict(m_row)
-            try:
-                m_dict['participants_list'] = json.loads(m_row['participants_list']) if m_row['participants_list'] else []
-            except Exception:
-                m_dict['participants_list'] = []
-                
-            # Get logs for this meeting
-            cursor.execute('SELECT * FROM meeting_logs WHERE meeting_id = ?', (m_dict['id'],))
-            m_dict['logs'] = [dict(row) for row in cursor.fetchall()]
-            meetings.append(m_dict)
-            
-    return jsonify(meetings)
-
-def _excel_column(number):
-    result = ''
-    while number:
-        number, remainder = divmod(number - 1, 26)
-        result = chr(65 + remainder) + result
-    return result
-
-
-def _make_xlsx(headers, rows):
-    """Build a small, valid XLSX with the standard library (no openpyxl dependency)."""
-    def cell(reference, value, style=''):
-        safe = escape('' if value is None else str(value)).replace('\n', '&#10;')
-        style_attr = f' s="{style}"' if style else ''
-        return f'<c r="{reference}" t="inlineStr"{style_attr}><is><t xml:space="preserve">{safe}</t></is></c>'
-
-    sheet_rows = []
-    for row_number, values in enumerate([headers] + rows, 1):
-        cells = ''.join(cell(f'{_excel_column(i)}{row_number}', value, '1' if row_number == 1 else '')
-                        for i, value in enumerate(values, 1))
-        sheet_rows.append(f'<row r="{row_number}">{cells}</row>')
-    last_column = _excel_column(max(1, len(headers)))
-    sheet = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-             '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-             f'<dimension ref="A1:{last_column}{max(1, len(rows) + 1)}"/>'
-             '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
-             f'<sheetData>{"".join(sheet_rows)}</sheetData><autoFilter ref="A1:{last_column}{max(1, len(rows) + 1)}"/></worksheet>')
-    output = io.BytesIO()
-    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>')
-        archive.writestr('_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
-        archive.writestr('xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Meetings" sheetId="1" r:id="rId1"/></sheets></workbook>')
-        archive.writestr('xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')
-        archive.writestr('xl/styles.xml', '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font/><font><b/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="2"><xf fontId="0" fillId="0" borderId="0" xfId="0"/><xf fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>')
-        archive.writestr('xl/worksheets/sheet1.xml', sheet)
-    output.seek(0)
-    return output
-
-
-# Export one row per meeting; repeated points and conversation become numbered columns.
-@app.route('/api/reports/export', methods=['GET'])
-def export_db():
-    try:
-        with get_db() as conn:
-            meetings = conn.execute('SELECT * FROM meetings ORDER BY date DESC, id DESC').fetchall()
-            records = []
-            max_logs = 0
-            max_history = {}
-            for meeting in meetings:
-                logs = []
-                for log in conn.execute('SELECT * FROM meeting_logs WHERE meeting_id = ? ORDER BY id', (meeting['id'],)).fetchall():
-                    item = dict(log)
-                    item['history'] = [dict(h) for h in conn.execute('SELECT * FROM remark_history WHERE log_id = ? ORDER BY id', (log['id'],)).fetchall()]
-                    logs.append(item)
-                max_logs = max(max_logs, len(logs))
-                for index, log in enumerate(logs, 1):
-                    max_history[index] = max(max_history.get(index, 0), len(log['history']))
-                records.append((dict(meeting), logs))
-
-        headers = ['Meeting ID', 'Forum Type', 'Date', 'Department / Unit', 'Facilitator', 'Number of Participants', 'Participants (Name / Employee ID)']
-        log_fields = ['Discussion Point', 'Action Item / Follow-up', 'Category', 'Priority', 'Person to Contact']
-        for index in range(1, max_logs + 1):
-            headers.extend([f'Point {index} - {field}' for field in log_fields])
-            for history_index in range(1, max_history.get(index, 0) + 1):
-                headers.extend([f'Point {index} - Update {history_index} Author', f'Point {index} - Update {history_index} Remark', f'Point {index} - Update {history_index} Date'])
-
-        rows = []
-        for meeting, logs in records:
-            try:
-                participants = json.loads(meeting.get('participants_list') or '[]')
-            except (TypeError, json.JSONDecodeError):
-                participants = []
-            participant_text = '; '.join(f"{p.get('name') or '(no name)'} / {p.get('empid') or '(no ID)'}" for p in participants)
-            row = [meeting['id'], meeting['forum_type'], meeting['date'], meeting['department'], meeting['facilitator'], meeting['num_participants'], participant_text]
-            for index in range(1, max_logs + 1):
-                log = logs[index - 1] if index <= len(logs) else None
-                if log:
-                    row.extend([log['discussion_point'], log['action_description'], log['category'], log['priority'], log['contact_person']])
-                    for history_index in range(max_history.get(index, 0)):
-                        history = log['history'][history_index] if history_index < len(log['history']) else None
-                        row.extend([history['author_type'], history['remark'], history['created_at']] if history else ['', '', ''])
-                else:
-                    row.extend([''] * (len(log_fields) + 3 * max_history.get(index, 0)))
-            rows.append(row)
-        output = _make_xlsx(headers, rows)
-        return send_file(
-            output,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            as_attachment=True,
-            download_name='OneVoice_Portal_Database.xlsx'
-        )
-    except Exception as e:
-        print(f"Export database error: {e}")
-        return jsonify({'error': f'Failed to export database: {str(e)}'}), 500
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
+@app.get("/")
+def home():return {"status":"healthy","database":"postgresql"}
+@app.post("/api/auth/login")
+def login():
+ d=request.get_json() or {}; db=DB(); u=db.query(User).filter_by(email=d.get("email","").lower().strip()).first(); db.close()
+ if not u or not u.active or not check_password_hash(u.password_hash,d.get("password","")):return jsonify(error="Invalid email or password"),401
+ return {"token":signer.dumps({"id":u.id}),"user":user_json(u)}
+@app.get("/api/auth/me")
+@require()
+def me():return user_json(request.user)
+@app.get("/api/users")
+@require("hr_admin","hr_team")
+def users():
+ db=DB(); x=[user_json(u) for u in db.query(User).filter_by(active=True).order_by(User.name)];db.close();return x
+@app.post("/api/users")
+@require("hr_admin")
+def add_user():
+ d=request.get_json() or {}
+ if not all(d.get(x) for x in ("name","email","password","role")) or d["role"] not in ("hr_admin","hr_team","action_owner","viewer"):return jsonify(error="Enter name, email, password and a valid role"),400
+ db=DB(); email=d["email"].lower().strip()
+ if db.query(User).filter_by(email=email).first():db.close();return jsonify(error="Email already exists"),409
+ u=User(name=d["name"].strip(),email=email,password_hash=generate_password_hash(d["password"]),role=d["role"]);db.add(u);db.commit();r=user_json(u);db.close();return r,201
+@app.post("/api/meetings")
+@require("hr_admin","hr_team")
+def add_meeting():
+ d=request.get_json() or {}
+ try:m=Meeting(forum_type=d["forum_type"],date=parsed(d["date"]),department=d["department"],facilitator=d["facilitator"],num_participants=int(d["num_participants"]),participants_list=json.dumps(d.get("participants_list",[])))
+ except (KeyError,ValueError,TypeError):return jsonify(error="Invalid or incomplete meeting data"),400
+ db=DB();db.add(m);db.commit();r=meeting_json(m);db.close();return r,201
+@app.get("/api/meetings")
+@require()
+def meetings():
+ db=DB();r=[meeting_json(m) for m in db.query(Meeting).order_by(Meeting.date.desc()).all()];db.close();return r
+@app.get("/api/meetings/<int:id>")
+@require()
+def get_meeting(id):
+ db=DB();m=db.get(Meeting,id)
+ if not m:db.close();return jsonify(error="Meeting not found"),404
+ r=meeting_json(m,True);db.close();return r
+@app.post("/api/meetings/<int:id>/logs")
+@require("hr_admin","hr_team")
+def add_action(id):
+ d=request.get_json() or {}; required=("discussion_point","category","priority","action_description","contact_person")
+ if any(not d.get(x) for x in required):return jsonify(error="Missing action fields"),400
+ try:due=parsed(d.get("due_date"))
+ except ValueError:return jsonify(error="Due date must use YYYY-MM-DD"),400
+ db=DB()
+ if not db.get(Meeting,id):db.close();return jsonify(error="Meeting not found"),404
+ a=Action(meeting_id=id,due_date=due,owner_id=d.get("owner_id") or None,**{x:d[x] for x in required},contact_email=d.get("contact_email",""));db.add(a);db.commit();r=action_json(a);db.close();return r,201
+@app.get("/api/actions")
+@require()
+def actions():
+ db=DB();q=db.query(Action)
+ if request.user.role not in ("hr_admin","hr_team"):q=q.filter(Action.owner_id==request.user.id)
+ if request.args.get("status"):q=q.filter(Action.status==request.args["status"])
+ r=[action_json(a,True) for a in q.order_by(Action.due_date.is_(None),Action.due_date).all()];db.close();return r
+@app.get("/api/logs/<int:id>")
+@require()
+def get_action(id):
+ db=DB();a=db.get(Action,id)
+ if not a or not allowed(a):db.close();return jsonify(error="Action not found"),404
+ r=action_json(a,True);r.update(forum_type=a.meeting.forum_type,meeting_date=iso(a.meeting.date),department=a.meeting.department,history=[{"id":x.id,"author_type":x.author,"remark":x.remark,"created_at":iso(x.created_at)} for x in a.history]);db.close();return r
+@app.patch("/api/logs/<int:id>")
+@require()
+def update_action(id):
+ d=request.get_json() or {};db=DB();a=db.get(Action,id)
+ if not a or not allowed(a):db.close();return jsonify(error="Action not found"),404
+ if request.user.role in ("hr_admin","hr_team"):
+  for f in ("status","priority","contact_person","contact_email","owner_id"):
+   if f in d:setattr(a,f,d[f])
+  if "due_date" in d:
+   try:a.due_date=parsed(d["due_date"])
+   except ValueError:db.close();return jsonify(error="Due date must use YYYY-MM-DD"),400
+ remark=d.get("remark") or d.get("owner_remarks") or d.get("hr_remarks")
+ if remark:db.add(Remark(action_id=a.id,author="HR" if request.user.role.startswith("hr_") else "Action Owner",remark=str(remark).strip()))
+ db.commit();r=action_json(a,True);db.close();return r
+@app.get("/api/dashboard")
+@require("hr_admin","hr_team")
+def dashboard():
+ db=DB();today=date.today();a=db.query(Action).all();r={"totals":{"open":sum(x.status=="Open" for x in a),"in_progress":sum(x.status=="In Progress" for x in a),"overdue":sum(x.status!="Completed" and x.due_date and x.due_date<today for x in a),"unassigned":sum(x.status!="Completed" and not x.owner_id for x in a)},"attention":[action_json(x,True) for x in a if x.status!="Completed" and (not x.owner_id or (x.due_date and x.due_date<=today+timedelta(days=7)))],"concerns":[{"category":c,"count":n} for c,n in db.query(Action.category,func.count(Action.id)).group_by(Action.category).order_by(func.count(Action.id).desc()).limit(5)]};db.close();return r
+@app.get("/api/calendar")
+@require()
+def calendar():
+ start=parsed(request.args.get("start")) or date.today().replace(day=1);end=parsed(request.args.get("end")) or start+timedelta(days=62);db=DB();events=[{"id":f"meeting-{m.id}","type":"meeting","date":iso(m.date),"title":f"{m.forum_type}: {m.department}","meeting_id":m.id} for m in db.query(Meeting).filter(Meeting.date.between(start,end))];q=db.query(Action).filter(Action.due_date.between(start,end))
+ if request.user.role not in ("hr_admin","hr_team"):q=q.filter(Action.owner_id==request.user.id)
+ events += [{"id":f"action-{a.id}","type":"action","date":iso(a.due_date),"title":a.action_description,"action_id":a.id,"status":a.status,"priority":a.priority} for a in q];db.close();return events
+@app.get("/api/notifications")
+@require()
+def notifications():
+ db=DB();r=[{"id":n.id,"action_id":n.action_id,"title":n.title,"body":n.body,"read":n.read,"created_at":iso(n.created_at)} for n in db.query(Notification).filter(or_(Notification.user_id==request.user.id,Notification.user_id.is_(None))).order_by(Notification.created_at.desc())];db.close();return r
+@app.post("/api/notifications/<int:id>/read")
+@require()
+def read_notification(id):
+ db=DB();n=db.get(Notification,id)
+ if not n or n.user_id not in (None,request.user.id):db.close();return jsonify(error="Notification not found"),404
+ n.read=True;db.commit();db.close();return {"ok":True}
+@app.post("/api/jobs/reminders")
+def reminders():
+ if request.headers.get("X-Job-Key")!=os.getenv("JOB_KEY"):return jsonify(error="Unauthorized"),401
+ db=DB();today=date.today();count=0
+ for a in db.query(Action).filter(Action.status!="Completed"):
+  if a.due_date and a.due_date<=today+timedelta(days=7) and (not a.last_reminded_at or a.last_reminded_at.date()!=today):db.add(Notification(user_id=a.owner_id,action_id=a.id,title="Action overdue" if a.due_date<today else "Action due soon",body=f"{a.action_description} is due {iso(a.due_date)}."));a.last_reminded_at=datetime.now(timezone.utc);count+=1
+ db.commit();db.close();return {"created":count}
+@app.get("/api/reports/summary")
+@require("hr_admin","hr_team")
+def report():
+ db=DB();today=date.today();a=db.query(Action).all();r={"generated_at":iso(datetime.now(timezone.utc)),"top_concerns":[{"category":c,"count":n} for c,n in db.query(Action.category,func.count(Action.id)).group_by(Action.category).order_by(func.count(Action.id).desc()).limit(5)],"high_risk_unresolved":[action_json(x,True) for x in a if x.status!="Completed" and (x.priority=="High" or (x.due_date and x.due_date<today))],"recommended_next_actions":["Assign every unassigned action owner.","Review overdue and high-priority actions in the next HR stand-up.","Plan a preventive intervention for recurring concerns."]};db.close();return r
+def bootstrap():
+ Base.metadata.create_all(engine);email=os.getenv("ADMIN_EMAIL");password=os.getenv("ADMIN_PASSWORD")
+ if email and password:
+  db=DB()
+  if not db.query(User).filter_by(email=email.lower()).first():db.add(User(name=os.getenv("ADMIN_NAME","HR Administrator"),email=email.lower(),password_hash=generate_password_hash(password),role="hr_admin"));db.commit()
+  db.close()
+bootstrap()
+if __name__=="__main__":app.run(host="0.0.0.0",port=int(os.getenv("PORT",5000)))

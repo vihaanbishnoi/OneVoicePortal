@@ -1,65 +1,24 @@
 const LOCAL_API_BASE_URL = 'http://localhost:5000/api';
-const LIVE_API_BASE_URL = 'https://onevoice-api-89c5.onrender.com/api';
-
-const API_BASE = import.meta.env.DEV
-  ? import.meta.env.VITE_API_BASE_URL || LOCAL_API_BASE_URL
-  : import.meta.env.VITE_API_BASE_URL || LIVE_API_BASE_URL;
-
-export async function fetchMeetings() {
-  const res = await fetch(`${API_BASE}/meetings`);
-  if (!res.ok) throw new Error('Failed to fetch meetings');
+const API_BASE = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? LOCAL_API_BASE_URL : '/api');
+const headers = () => localStorage.getItem('onevoice_token') ? { Authorization: `Bearer ${localStorage.getItem('onevoice_token')}` } : {};
+async function request(path, options = {}) {
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers: { ...headers(), ...(options.headers || {}) } });
+  if (res.status === 401) { localStorage.clear(); window.dispatchEvent(new Event('onevoice-logout')); }
+  if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(body.error || 'Request failed'); }
   return res.json();
 }
-
-export async function fetchMeeting(id) {
-  const res = await fetch(`${API_BASE}/meetings/${id}`);
-  if (!res.ok) throw new Error('Failed to fetch meeting details');
-  return res.json();
-}
-
-export async function fetchMeetingLog(id) {
-  const res = await fetch(`${API_BASE}/logs/${id}`);
-  if (!res.ok) throw new Error('Failed to fetch discussion/action details');
-  return res.json();
-}
-
-export async function createMeeting(data) {
-  const res = await fetch(`${API_BASE}/meetings`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error('Failed to create meeting');
-  return res.json();
-}
-
-export async function addMeetingLog(meetingId, data) {
-  const res = await fetch(`${API_BASE}/meetings/${meetingId}/logs`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error('Failed to add discussion-action log');
-  return res.json();
-}
-
-export async function updateRemarks(logId, data) {
-  const res = await fetch(`${API_BASE}/logs/${logId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error('Failed to update remarks');
-  return res.json();
-}
-
-export async function searchReports(params = {}) {
-  const query = new URLSearchParams(params).toString();
-  const res = await fetch(`${API_BASE}/reports/search?${query}`);
-  if (!res.ok) throw new Error('Failed to search reports');
-  return res.json();
-}
-
-export function exportDatabaseUrl() {
-  return `${API_BASE}/reports/export`;
-}
+export const login = (email, password) => request('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+export const fetchDashboard = () => request('/dashboard');
+export const fetchCalendar = (params = {}) => request(`/calendar?${new URLSearchParams(params)}`);
+export const fetchNotifications = () => request('/notifications');
+export const readNotification = id => request(`/notifications/${id}/read`, { method: 'POST' });
+export const fetchActions = () => request('/actions');
+export const fetchUsers = () => request('/users');
+export const fetchSummary = () => request('/reports/summary');
+export const fetchMeetings = () => request('/meetings');
+export const fetchMeeting = id => request(`/meetings/${id}`);
+export const fetchMeetingLog = id => request(`/logs/${id}`);
+export const createMeeting = data => request('/meetings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+export const addMeetingLog = (meetingId, data) => request(`/meetings/${meetingId}/logs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+export const updateRemarks = (logId, data) => request(`/logs/${logId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+export const searchReports = () => fetchMeetings();

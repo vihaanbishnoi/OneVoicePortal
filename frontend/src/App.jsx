@@ -1,26 +1,6 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import Home from './pages/Home';
-import NewMeeting from './pages/NewMeeting';
-import Meetings from './pages/Meetings';
-import MeetingDetail from './pages/MeetingDetail';
-import LogDetail from './pages/LogDetail';
-import Reports from './pages/Reports';
-
-function App() {
-  return (
-    <Router>
-      <div className="app-container">
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/new-meeting" element={<NewMeeting />} />
-          <Route path="/meetings" element={<Meetings />} />
-          <Route path="/meetings/:id" element={<MeetingDetail />} />
-          <Route path="/meetings/:meetingId/logs/:logId" element={<LogDetail />} />
-          <Route path="/reports" element={<Reports />} />
-        </Routes>
-      </div>
-    </Router>
-  );
-}
-
-export default App;
+import { useEffect, useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, NavLink, useNavigate } from 'react-router-dom';
+import Login from './pages/Login'; import Dashboard from './pages/Dashboard'; import Calendar from './pages/Calendar'; import Notifications from './pages/Notifications';
+import NewMeeting from './pages/NewMeeting'; import Meetings from './pages/Meetings'; import MeetingDetail from './pages/MeetingDetail'; import LogDetail from './pages/LogDetail'; import Reports from './pages/Reports';
+function Shell({ user, logout }) { const navigate=useNavigate(); const nav=[['/','Overview'],['/calendar','Calendar'],['/meetings','Meetings'],['/new-meeting','New meeting'],['/reports','Reports'],['/notifications','Notifications']]; return <div className="portal"><aside><div className="brand"><span>OV</span><b>OneVoice</b></div><nav>{nav.map(([to,label])=><NavLink key={to} to={to} end={to==='/'}>{label}</NavLink>)}</nav><div className="profile"><b>{user.name}</b><small>{user.role.replace('_',' ')}</small><button className="btn-secondary" onClick={()=>{logout();navigate('/')}}>Sign out</button></div></aside><main className="app-main"><Routes><Route path="/" element={<Dashboard/>}/><Route path="/calendar" element={<Calendar/>}/><Route path="/notifications" element={<Notifications/>}/><Route path="/new-meeting" element={<NewMeeting/>}/><Route path="/meetings" element={<Meetings/>}/><Route path="/meetings/:id" element={<MeetingDetail/>}/><Route path="/meetings/:meetingId/logs/:logId" element={<LogDetail/>}/><Route path="/reports" element={<Reports/>}/></Routes></main></div> }
+function App(){const [user,setUser]=useState(()=>{try{return JSON.parse(localStorage.getItem('onevoice_user'))}catch{return null}});useEffect(()=>{const out=()=>setUser(null);window.addEventListener('onevoice-logout',out);return()=>window.removeEventListener('onevoice-logout',out)},[]);const logout=()=>{localStorage.removeItem('onevoice_token');localStorage.removeItem('onevoice_user');setUser(null)};return <Router>{user?<Shell user={user} logout={logout}/>:<Login onLogin={setUser}/>}</Router>}; export default App;

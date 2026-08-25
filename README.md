@@ -25,7 +25,7 @@ Excel when needed.
 The application has two parts:
 
 - A React web interface where users create and review meeting records.
-- A Flask API that stores those records in a local SQLite database.
+- A Flask API backed by PostgreSQL, with secure authentication, HR roles, action deadlines, calendar events, and in-app reminders.
 
 When you run the project locally, both parts need to be running: the frontend
 opens in your browser and communicates with the backend API in the background.
@@ -48,14 +48,15 @@ git clone https://github.com/vihaanbishnoi/OneVoicePortal.git
 cd OneVoicePortal
 ```
 
-### 2. Start the backend
+### 2. Configure and start the backend
 
 In the project folder, run:
 
 ```powershell
+copy .env.example .env
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -r requirements-postgres.txt
 python backend\app.py
 ```
 
@@ -80,7 +81,7 @@ You can now create and manage meetings locally.
 ```text
 .
 |-- backend/
-|   `-- app.py              # Flask API and database logic
+|   `-- app.py              # Flask PostgreSQL API and database logic
 |-- frontend/
 |   |-- src/                # React pages and user interface
 |   `-- package.json        # Frontend dependencies and scripts
@@ -91,7 +92,7 @@ You can now create and manage meetings locally.
 
 - **Frontend:** React, Vite, React Router
 - **Backend:** Python, Flask, Flask-CORS
-- **Database:** SQLite
+- **Database:** PostgreSQL (required; no SQLite fallback)
 
 ## Useful frontend commands
 
