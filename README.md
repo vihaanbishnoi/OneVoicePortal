@@ -1,106 +1,115 @@
 # OneVoice Portal
 
-OneVoice Portal is a meeting-management web app for recording employee forums,
-capturing the discussion, assigning follow-up actions, and keeping everyone
-updated on progress.
+A meeting and follow-up application with a private Admin workspace and an editable
+recruiter demo. HR records concerns, assigns responsible people, links email
+conversations, and reviews summaries and draft follow-up emails.
 
-**Live demo:** [Open OneVoice Portal](https://onevoiceportal.onrender.com/)
+## Current functionality
 
-Instead of relying on separate notes, spreadsheets, and message threads, a
-meeting and its action items are kept together in one place. Teams can revisit
-past meetings, search records, add follow-up remarks, and export their data to
-Excel when needed.
+- Password-free demo: each visitor gets a separate fictional dataset for 12 hours.
+- Admin login: vihaan4263@gmail.com; password configured outside Git.
+- Overview cards for new meetings, previous meetings, reports, notifications, and calendar.
+- Text action owners, contact email, status, priority, due dates, and follow-up remarks.
+- Recording/update timestamps and Admin activity history; dates display in India time.
+- Gmail OAuth, linked conversation import, periodic reply sync, and unsent drafts.
+- Copy/paste email fallback. Original timestamps are not invented for pasted text.
+- Private AI through local Ollama; demo AI through server-side OpenAI.
+- CSV archive exports for all records or a year, calendar quarter, or month.
 
-## What you can do
+Gmail and OpenAI integrations need your external credentials before live use.
+Missing settings are displayed clearly; the app does not fabricate AI output or
+pretend to have synchronized mail. It never sends email automatically.
 
-- Log a meeting with its forum type, date, department, facilitator, and participants.
-- Record discussion points, priority, category, action item, and action owner.
-- View previous meetings and drill into each action item.
-- Add and review a chronological history of HR and action-owner remarks.
-- Search meeting records by forum type and date range.
-- Export all meeting information to an Excel workbook.
+## Architecture
 
-## How it works
+Browser (React) -> Flask API -> PostgreSQL
 
-The application has two parts:
+Flask also calls Gmail for authorized Admin mail and the appropriate AI provider.
+Demo access is a signed, scoped session, not removal of backend authorization.
+Every meeting/action query is scoped to its demo session or the private workspace.
+The Docker deployment serves React and the API from one origin.
 
-- A React web interface where users create and review meeting records.
-- A Flask API backed by PostgreSQL, with secure authentication, HR roles, action deadlines, calendar events, and in-app reminders.
+Backend files: app.py is the entry point; server.py contains API routes; models.py
+contains database models; migrations.py performs additive schema upgrades;
+gmail.py and ai.py contain external integrations. frontend/src/pages contains UI.
 
-When you run the project locally, both parts need to be running: the frontend
-opens in your browser and communicates with the backend API in the background.
+## Run locally in PowerShell
 
-## Run locally
-
-### Before you start
-
-Install the following on your computer:
-
-- Python 3.10 or newer
-- Node.js 20 or newer
-
-### 1. Download the project
-
-Clone the repository and open its folder in PowerShell:
+Docker Desktop must be running. The existing database container uses laptop port
+15432 because port 5432 was occupied:
 
 ```powershell
-git clone https://github.com/vihaanbishnoi/OneVoicePortal.git
-cd OneVoicePortal
-```
-
-### 2. Configure and start the backend
-
-In the project folder, run:
-
-```powershell
-copy .env.example .env
+docker start onevoice-db-local
+cd C:\Users\vihaa\Desktop\Projects\OneVoicePortal
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements-postgres.txt
-python backend\app.py
+.\.venv\Scripts\python.exe -m pip install -r requirements-postgres.txt
+.\.venv\Scripts\python.exe backend\app.py
 ```
 
-Keep this terminal open. The backend will run at `http://localhost:5000` and
-will create the local database automatically the first time it starts.
-
-### 3. Start the frontend
-
-Open a second PowerShell terminal in the same project folder and run:
+Keep that terminal open. In a second terminal:
 
 ```powershell
+cd C:\Users\vihaa\Desktop\Projects\OneVoicePortal\frontend
+npm.cmd ci
+npm.cmd run dev
+```
+
+Open the URL printed by Vite, usually http://localhost:5173. Backend health is at
+http://localhost:5000/api/health. Restart the backend after changing Python code
+or environment settings. Vite updates frontend changes automatically.
+
+For a one-command manual restart from the project folder:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-local.ps1
+```
+
+The launcher replaces only a verified backend from this project's virtual
+environment. It refuses to stop an unrelated application on the same port.
+It runs in your terminal; Ctrl+C stops it.
+
+The ignored .env is already configured for the local database and Admin password.
+For a new checkout, copy .env.example to .env and set the required values.
+PostgreSQL itself must exist; startup creates tables, not a database server.
+Existing meeting records are retained, and historical creation times stay unknown.
+
+## AI and Gmail setup
+
+See docs/GMAIL_SETUP.md for Google Cloud/OAuth steps. Store secrets in .env or
+hosting settings, never React code or Git. The Gmail token encryption key is
+separate from the session signing key and must remain stable.
+
+Local .env uses the existing phi:latest Ollama model with a 2048-token context.
+A larger locally installed model/context can be configured after evaluation.
+Keep Ollama cloud features disabled for private use (OLLAMA_NO_CLOUD=1 when
+starting Ollama). Ollama must be running on the configured address.
+
+Add OPENAI_API_KEY to server configuration to enable fictional-data demo AI.
+OPENAI_MODEL defaults to gpt-4.1-mini. The app limits demo AI usage per session
+and across the server. Also configure a budget in your OpenAI project.
+
+## Verification
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 cd frontend
-npm install
-npm run dev
+npm.cmd run lint
+npm.cmd run build
 ```
 
-Open the link displayed in the terminal, usually `http://localhost:5173`.
-You can now create and manage meetings locally.
+Tests default to an injected SQLite database and mocked external providers.
+They verify authorization, cross-session isolation, exports, quotas, Gmail import
+deduplication, token encryption, and additive migration. PostgreSQL tests support
+ONEVOICE_TEST_DATABASE_URL and refuse database names not ending in _codex_test.
+That database is disposable: the suite rebuilds its tables. Never point tests at
+real meeting data. Provider mocks do not prove live authorization or model quality.
 
-## Project structure
+## Deployment and evaluation
 
-```text
-.
-|-- backend/
-|   `-- app.py              # Flask PostgreSQL API and database logic
-|-- frontend/
-|   |-- src/                # React pages and user interface
-|   `-- package.json        # Frontend dependencies and scripts
-`-- requirements.txt        # Python dependencies
-```
+See docs/DEPLOYMENT.md for the Docker image and existing Render-service setup.
+Public deployment rejects the weak local Admin password and shared HR login.
+Keep the private database/mailbox inaccessible to the public demo.
 
-## Technology used
-
-- **Frontend:** React, Vite, React Router
-- **Backend:** Python, Flask, Flask-CORS
-- **Database:** PostgreSQL (required; no SQLite fallback)
-
-## Useful frontend commands
-
-Run these from the `frontend` folder:
-
-```powershell
-npm run dev      # Start the local development site
-npm run build    # Create a production build
-npm run lint     # Check the frontend code for common issues
-npm run preview  # Preview a production build locally
-```
+See docs/AI_EVALUATION.md for a small evaluation plan. Interview claims should
+use observed results, clearly distinguish mocks from live tests, and explain the
+context limits, manual review, isolation, and deployment trade-offs.

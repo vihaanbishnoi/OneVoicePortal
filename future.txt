@@ -1,3 +1,0 @@
-Calendar
-Notification
-Role Based Access

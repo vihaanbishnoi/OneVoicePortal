@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchMeetings } from '../api';
+import { timestamp } from '../utils';
 
 export default function Meetings() {
   const [meetings, setMeetings] = useState([]);
@@ -50,6 +51,7 @@ export default function Meetings() {
                 <th>Department</th>
                 <th>Facilitator</th>
                 <th>Participants</th>
+                <th>Recorded at</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
@@ -66,6 +68,7 @@ export default function Meetings() {
                   <td>{m.department}</td>
                   <td>{m.facilitator}</td>
                   <td>{m.num_participants} attendees</td>
+                  <td>{timestamp(m.created_at)}</td>
                   <td style={{ textAlign: 'right' }}>
                     <Link to={`/meetings/${m.id}`}>
                       <button className="btn-secondary" style={{ padding: '6px 12px', fontSize: '0.8rem' }}>

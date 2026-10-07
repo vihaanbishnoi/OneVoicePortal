@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { addMeetingLog, fetchMeeting, fetchUsers } from '../api';
+import { addMeetingLog, fetchMeeting } from '../api';
+import { timestamp } from '../utils';
 
 export default function MeetingDetail() {
   const { id } = useParams();
   const [meeting, setMeeting] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ discussion_point: '', action_description: '', category: '', priority: 'Medium', contact_person: '', due_date: '', owner_id: '' });
-  const [users, setUsers] = useState([]);
+  const emptyForm = { discussion_point: '', action_description: '', category: '', priority: 'Medium', contact_person: '', contact_email: '', due_date: '', owner_name: '' };
+  const [form, setForm] = useState(emptyForm);
 
   useEffect(() => {
     fetchMeeting(id).then(setMeeting).catch(err => setError(err.message));
-    fetchUsers().then(setUsers).catch(() => setUsers([]));
   }, [id]);
 
   const change = (field, value) => setForm(current => ({ ...current, [field]: value }));
@@ -22,7 +22,7 @@ export default function MeetingDetail() {
     try {
       const log = await addMeetingLog(id, form);
       setMeeting(current => ({ ...current, logs: [...current.logs, log] }));
-      setForm({ discussion_point: '', action_description: '', category: '', priority: 'Medium', contact_person: '', due_date: '', owner_id: '' });
+      setForm(emptyForm);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -40,6 +40,7 @@ export default function MeetingDetail() {
         <span className="badge badge-open">{meeting.forum_type}</span>
         <h1>Meeting Details #{meeting.id}</h1>
         <p>{meeting.date} &nbsp;•&nbsp; {meeting.department} &nbsp;•&nbsp; Facilitator: {meeting.facilitator} &nbsp;•&nbsp; {meeting.num_participants} participants</p>
+        <p className="record-timestamps">Recorded: {timestamp(meeting.created_at)} · Last updated: {timestamp(meeting.updated_at)}</p>
         {meeting.participants_list?.length > 0 && (
           <div className="card" style={{ maxWidth: '700px', margin: '18px auto' }}>
             <strong>Participants: </strong>
@@ -78,8 +79,9 @@ export default function MeetingDetail() {
             <div><label>Category *</label><input type="text" required value={form.category} onChange={e => change('category', e.target.value)} /></div>
             <div><label>Priority</label><select value={form.priority} onChange={e => change('priority', e.target.value)}><option>High</option><option>Medium</option><option>Low</option></select></div>
             <div><label>Person to Contact *</label><input type="text" required value={form.contact_person} onChange={e => change('contact_person', e.target.value)} /></div>
+            <div><label>Contact email</label><input type="email" value={form.contact_email} onChange={e => change('contact_email', e.target.value)} /></div>
             <div><label>Due date</label><input type="date" value={form.due_date} onChange={e => change('due_date', e.target.value)} /></div>
-            <div><label>Action owner</label><select value={form.owner_id} onChange={e => change('owner_id', e.target.value ? Number(e.target.value) : '')}><option value="">Unassigned</option>{users.map(user => <option value={user.id} key={user.id}>{user.name}</option>)}</select></div>
+            <div><label>Action owner</label><input type="text" value={form.owner_name} onChange={e => change('owner_name', e.target.value)} placeholder="Enter the responsible person's name" /></div>
           </div>
           <button disabled={saving} style={{ width: '100%' }}>{saving ? 'Saving...' : 'Save Log Entry'}</button>
         </form>

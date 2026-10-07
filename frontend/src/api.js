@@ -1,13 +1,36 @@
 const LOCAL_API_BASE_URL = 'http://localhost:5000/api';
 const API_BASE = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? LOCAL_API_BASE_URL : '/api');
-const headers = () => localStorage.getItem('onevoice_token') ? { Authorization: `Bearer ${localStorage.getItem('onevoice_token')}` } : {};
 async function request(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers: { ...headers(), ...(options.headers || {}) } });
-  if (res.status === 401) { localStorage.clear(); window.dispatchEvent(new Event('onevoice-logout')); }
+  const { responseType, ...fetchOptions } = options;
+  const token = localStorage.getItem('onevoice_token');
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await fetch(`${API_BASE}${path}`, { credentials: 'include', ...fetchOptions, headers: { ...headers, ...(options.headers || {}) } });
+  if (res.status === 401 && token && token === localStorage.getItem('onevoice_token')) {
+    clearSession();
+    window.dispatchEvent(new Event('onevoice-logout'));
+  }
   if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(body.error || 'Request failed'); }
-  return res.json();
+  return responseType === 'blob' ? res.blob() : res.json();
 }
-export const login = (email, password) => request('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+export function clearSession() {
+  localStorage.removeItem('onevoice_token');
+  localStorage.removeItem('onevoice_user');
+}
+export const login = credentials => request('/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(credentials) });
+export const fetchCurrentUser = () => request('/auth/me');
+export const startDemo = () => request('/auth/demo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+const post = (path, data = {}) => request(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+export const exportRecords = params => request(`/reports/export?${new URLSearchParams(params)}`, { responseType: 'blob' });
+export const fetchActivity = () => request('/admin/activity');
+export const fetchGmailStatus = () => request('/gmail/status');
+export const startGmailConnect = () => request('/gmail/start', { headers: { 'X-Frontend-Origin': window.location.origin } });
+export const disconnectGmail = () => request('/gmail/connection', { method: 'DELETE' });
+export const syncGmail = () => post('/gmail/sync');
+export const searchGmail = q => request(`/gmail/threads?${new URLSearchParams({ q })}`);
+export const linkGmailThread = (id, threadId) => post(`/logs/${id}/gmail-link`, { thread_id: threadId });
+export const createGmailDraft = (id, data) => post(`/logs/${id}/gmail-draft`, data);
+export const addConversationMessage = (id, data) => post(`/logs/${id}/messages`, data);
+export const generateAI = (id, data) => post(`/logs/${id}/ai`, data);
 export const fetchDashboard = () => request('/dashboard');
 export const fetchCalendar = (params = {}) => request(`/calendar?${new URLSearchParams(params)}`);
 export const fetchNotifications = () => request('/notifications');
