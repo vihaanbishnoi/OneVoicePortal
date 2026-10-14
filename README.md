@@ -55,7 +55,7 @@ The React frontend calls a Flask API, which stores meeting and action data in Po
 
 ## Validation and source
 
-The automated backend suite contains **43 tests** covering authentication, demo isolation, editing limits, exports, Gmail integration behavior, AI routing, migrations, and startup configuration. Frontend lint and the production build also pass. The default test suite uses an isolated database and mocked external providers; model quality is assessed separately.
+Automated backend tests cover authentication, demo isolation, editing limits, exports, Gmail integration behavior, AI routing, migrations, and startup configuration, including PostgreSQL driver selection. Frontend lint and the production build also pass. The default test suite uses an isolated database and mocked external providers; model quality is assessed separately.
 
 - [Authentication tests](tests/test_auth.py)
 - [Workspace and integration tests](tests/test_workspace.py)

@@ -35,7 +35,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.exceptions import RequestEntityTooLarge, TooManyRequests
 
 from . import ai, gmail
-from .config import validate_settings
+from .config import normalize_database_url, validate_settings
 from .migrations import migrate
 from .models import (
     Base,
@@ -55,9 +55,7 @@ from .models import (
 
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
-DATABASE_URL = os.getenv("DATABASE_URL", "").replace(
-    "postgres://", "postgresql+psycopg2://", 1
-)
+DATABASE_URL = normalize_database_url(os.getenv("DATABASE_URL", ""))
 SECRET_KEY = os.getenv("SECRET_KEY")
 ADMIN_EMAIL = "vihaan4263@gmail.com"
 SHARED_TEAM_EMAIL = "shared-hr@onevoice.invalid"

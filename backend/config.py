@@ -1,6 +1,15 @@
 """Validate startup settings without connecting to or modifying a database."""
 
 
+def normalize_database_url(database_url):
+    """Select the installed psycopg2 driver for standard provider URLs."""
+    database_url = database_url.strip()
+    for prefix in ("postgres://", "postgresql://"):
+        if database_url.startswith(prefix):
+            return "postgresql+psycopg2://" + database_url[len(prefix):]
+    return database_url
+
+
 def validate_settings(database_url, secret_key, admin_password, public, shared_login):
     errors = []
     if not database_url.startswith(("postgresql://", "postgresql+psycopg2://")):
@@ -31,7 +40,7 @@ if __name__ == "__main__":
     load_dotenv(Path(__file__).resolve().parents[1] / ".env")
     try:
         validate_settings(
-            os.getenv("DATABASE_URL", "").replace("postgres://", "postgresql+psycopg2://", 1),
+            normalize_database_url(os.getenv("DATABASE_URL", "")),
             os.getenv("SECRET_KEY"),
             os.getenv("ADMIN_PASSWORD"),
             args.public or os.getenv("PUBLIC_DEPLOYMENT") == "1" or os.getenv("RENDER") == "true",

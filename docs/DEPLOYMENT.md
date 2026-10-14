@@ -81,6 +81,23 @@ service and verify `/api/health`, password-free demo creation, and Admin sign-in
 If startup still fails, the new logs will identify a configuration error or show
 a traceback for the remaining issue. Do not create another service to troubleshoot.
 
+## Free PostgreSQL with Neon
+
+The existing Render API can connect to a Neon PostgreSQL database. Copy the
+complete connection URL from Neon's Connect dialog into the Render service's
+`DATABASE_URL`, including its SSL parameters. Use the URL itself rather than
+a `psql` command or an environment-variable assignment. The app creates its
+tables on startup and seeds fictional records when a visitor opens a demo.
+
+Standard `postgres://` and `postgresql://` URLs are normalized to
+`postgresql+psycopg2://` to select the driver installed by this project's
+requirements. This avoids SQLAlchemy 2.1 selecting the separate `psycopg`
+driver for a bare `postgresql://` URL. Credentials and SSL parameters are
+preserved. The configuration checker applies the same normalization.
+
+Sources: [Neon connection strings](https://neon.com/docs/connect/connect-from-any-app),
+[SQLAlchemy PostgreSQL drivers](https://docs.sqlalchemy.org/en/21/dialects/postgresql.html).
+
 ## Operational limits
 
 - Each anonymous demo creates a separate fictional workspace and expires after
