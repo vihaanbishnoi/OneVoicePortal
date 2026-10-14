@@ -4,7 +4,7 @@ $taskRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $taskPython = Join-Path $taskRoot '.venv\Scripts\python.exe'
 $taskApp = Join-Path $taskRoot 'backend\app.py'
 if (!(Test-Path -LiteralPath $taskPython)) {
-    throw 'Create .venv and install requirements-postgres.txt first; see README.md.'
+    throw 'Create .venv and install requirements-lock.txt first; see docs/DEVELOPMENT.md.'
 }
 $taskListener = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($taskListener) {
