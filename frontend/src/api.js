@@ -4,12 +4,25 @@ async function request(path, options = {}) {
   const { responseType, ...fetchOptions } = options;
   const token = localStorage.getItem('onevoice_token');
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
-  const res = await fetch(`${API_BASE}${path}`, { credentials: 'include', ...fetchOptions, headers: { ...headers, ...(options.headers || {}) } });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, { credentials: 'include', ...fetchOptions, headers: { ...headers, ...(options.headers || {}) } });
+  } catch {
+    throw new Error('Unable to reach the workspace. Check your connection and try again.');
+  }
   if (res.status === 401 && token && token === localStorage.getItem('onevoice_token')) {
     clearSession();
     window.dispatchEvent(new Event('onevoice-logout'));
   }
-  if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(body.error || 'Request failed'); }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const fallback = res.status >= 500
+      ? 'The workspace is temporarily unavailable. Please try again shortly.'
+      : res.status === 404 && path === '/auth/demo'
+        ? 'The demo is not available on this server yet. Please try again after the deployment is updated.'
+        : 'Request failed. Please try again.';
+    throw new Error(body.error || fallback);
+  }
   return responseType === 'blob' ? res.blob() : res.json();
 }
 export function clearSession() {

@@ -35,6 +35,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.exceptions import RequestEntityTooLarge, TooManyRequests
 
 from . import ai, gmail
+from .config import validate_settings
 from .migrations import migrate
 from .models import (
     Base,
@@ -65,23 +66,10 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 HR_TEAM_PASSWORD = os.getenv("HR_TEAM_PASSWORD", secrets.token_urlsafe(32))
 ALLOW_SHARED_HR_LOGIN = os.getenv("ALLOW_SHARED_HR_LOGIN", "0") == "1"
 DEMO_ENABLED = os.getenv("DEMO_ENABLED", "1") == "1"
-if (
-    not DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg2://"))
-    or not SECRET_KEY
-    or not ADMIN_PASSWORD
-):
-    raise RuntimeError(
-        "Configure a PostgreSQL DATABASE_URL, SECRET_KEY, and ADMIN_PASSWORD in .env."
-    )
 PUBLIC_DEPLOYMENT = (
     os.getenv("PUBLIC_DEPLOYMENT") == "1" or os.getenv("RENDER") == "true"
 )
-if PUBLIC_DEPLOYMENT and (
-    len(ADMIN_PASSWORD) < 12 or len(SECRET_KEY) < 32 or ALLOW_SHARED_HR_LOGIN
-):
-    raise RuntimeError(
-        "Public deployment requires a strong Admin password/signing key and shared HR login disabled."
-    )
+validate_settings(DATABASE_URL, SECRET_KEY, ADMIN_PASSWORD, PUBLIC_DEPLOYMENT, ALLOW_SHARED_HR_LOGIN)
 FRONTEND_URL = (
     os.getenv("FRONTEND_URL")
     or os.getenv("RENDER_EXTERNAL_URL")

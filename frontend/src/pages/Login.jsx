@@ -37,21 +37,11 @@ export default function Login({ onLogin }) {
     <main className="login-shell">
       <section className="login-card">
         <span className="eyebrow">ONEVOICE PORTAL</span>
-        <h1>Welcome back</h1>
-        <p>Record employee meetings and keep follow-up actions moving.</p>
-        <div className="login-options" role="group" aria-label="Sign-in type">
-          <button type="button" className={mode === 'demo' ? 'selected' : 'btn-secondary'}
-            aria-pressed={mode === 'demo'} disabled={busy} onClick={() => selectMode('demo')}>
-            Try demo
-          </button>
-          <button type="button" className={mode === 'admin' ? 'selected' : 'btn-secondary'}
-            aria-pressed={mode === 'admin'} disabled={busy} onClick={() => selectMode('admin')}>
-            Admin
-          </button>
-        </div>
-        <p className="login-description">
-          {mode === 'admin' ? 'Sign in to your private workspace.' : 'Explore an editable workspace with fictional meetings and conversations. No password needed. Please use sample data only.'}
+        <h1>{mode === 'admin' ? 'Admin sign in' : 'Try OneVoice'}</h1>
+        <p>
+          {mode === 'admin' ? 'Sign in to your private workspace.' : 'Record meetings, track follow-ups, and review sample conversations.'}
         </p>
+        {mode === 'demo' && <p className="login-description">No sign-up or password. Use fictional data only.</p>}
         {error && <div className="alert" role="alert">{error}</div>}
         <form onSubmit={submit}>
           {mode === 'admin' && (
@@ -69,7 +59,12 @@ export default function Login({ onLogin }) {
           <button type="submit" disabled={busy}>
             {busy ? 'Opening workspace…' : mode === 'admin' ? 'Sign in as Admin' : 'Open demo'}
           </button>
+          {busy && <p className="login-description" role="status">Connecting to the workspace. The first visit may take a moment.</p>}
         </form>
+        <button type="button" className="btn-secondary login-switch" disabled={busy}
+          onClick={() => selectMode(mode === 'admin' ? 'demo' : 'admin')}>
+          {mode === 'admin' ? 'Back to demo' : 'Admin sign in'}
+        </button>
       </section>
     </main>
   );

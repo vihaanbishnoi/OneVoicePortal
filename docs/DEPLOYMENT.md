@@ -22,6 +22,29 @@ for historical meeting rows. Back up a production database before upgrades.
 
 ## Existing Render service
 
+The `Optimization` commit introduced a required `ADMIN_PASSWORD` and public
+startup checks. Render sets `RENDER=true`, so these checks apply even if
+`PUBLIC_DEPLOYMENT` is unset or 0. A missing/short Admin password, a signing key
+shorter than 32 characters, or enabled shared HR login stops the API before it
+can listen for requests. A failed deployment notification alone does not tell
+which setting failed; use the traceback from the deploy logs when available.
+
+On the existing **onevoice-api** service's Environment page, set
+`ADMIN_PASSWORD` to a strong password of at least 12 characters, ensure
+`SECRET_KEY` has at least 32 characters, and set `ALLOW_SHARED_HR_LOGIN=0`.
+Keep the signing key stable if it already meets the requirement. These are
+server credentials; recruiters still enter the demo without a password.
+Never copy the short local development password into a public service.
+
+Check configuration locally without accessing any meeting data:
+
+```powershell
+.\.venv\Scripts\python.exe -m backend.config --public
+```
+
+This checks local environment settings, not Render's settings or database
+connectivity. Errors name every invalid setting and never print its value.
+
 1. Publish the reviewed code to the repository connected to your Render service.
 2. Use the Docker runtime with this repository's Dockerfile. `render.yaml` is a
    configuration template; check your existing service plan rather than creating
@@ -41,6 +64,22 @@ for historical meeting rows. Back up a production database before upgrades.
    sign-in, CSV exports, and isolation after deployment. Private Ollama features
    need a reachable local/private inference service; they are never automatically
    sent to OpenAI when unavailable.
+
+If the existing service uses Render's native Python runtime, adding `render.yaml`
+or a Dockerfile does not change that service's runtime automatically. From the
+repository root, install with `pip install -r requirements-lock.txt` and start
+with `gunicorn backend.app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 240`.
+For a service whose Root Directory is `backend`, use
+`pip install -r ../requirements-lock.txt` and `gunicorn app:app` with the same
+server flags. Native API-only hosting also needs a separately built frontend:
+set its `VITE_API_BASE_URL` to the API's HTTPS URL ending in `/api`, and set the
+API's `CORS_ORIGINS` and `FRONTEND_URL` to that frontend's HTTPS origin.
+The Docker setup builds both parts and serves them from one origin.
+
+After saving the required settings and publishing the code, redeploy the existing
+service and verify `/api/health`, password-free demo creation, and Admin sign-in.
+If startup still fails, the new logs will identify a configuration error or show
+a traceback for the remaining issue. Do not create another service to troubleshoot.
 
 ## Operational limits
 
