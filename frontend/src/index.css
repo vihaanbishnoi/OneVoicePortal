@@ -73,7 +73,6 @@ body {
 }
 
 /* App Layout Container - Centered Alignment */
-.demo-banner { padding: 12px 16px; margin-bottom: 24px; border: 1px solid #c7d2fe; background: #eef2ff; border-radius: 10px; color: #3730a3; font-size: .85rem; }
 .home-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; max-width: 960px; }
 .home-card { display: flex; flex-direction: column; align-items: flex-start; padding: 28px; min-height: 210px; background: white; border: 1px solid var(--border-light); border-radius: 14px; text-decoration: none; color: inherit; box-shadow: var(--shadow); }
 .home-card:hover { border-color: var(--primary); }

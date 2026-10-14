@@ -16,13 +16,14 @@ function Shell({ user, logout }) {
         <div className="brand"><span>OV</span><b>OneVoice</b></div>
         <nav>{nav.map(([to, label]) => <NavLink key={to} to={to} end={to === '/'}>{label}</NavLink>)}</nav>
         <div className="profile">
-          <b>{user.name}</b>
-          <small>{user.demo ? 'Fictional-data demo' : user.role === 'hr_admin' ? 'Administrator' : 'HR Team'}</small>
+          {!user.demo && <>
+            <b>{user.name}</b>
+            <small>{user.role === 'hr_admin' ? 'Administrator' : 'HR Team'}</small>
+          </>}
           <button className="btn-secondary" onClick={() => { logout(); navigate('/'); }}>Sign out</button>
         </div>
       </aside>
       <main className="app-main">
-        {user.demo && <div className="demo-banner">Editable demo · Your sample workspace is separate from other visitors and private HR records. Use fictional data only.</div>}
         <Routes>
           <Route path="/" element={<Home user={user} />} />
           <Route path="/calendar" element={<Calendar />} />

@@ -41,7 +41,7 @@ export default function Login({ onLogin }) {
         <p>
           {mode === 'admin' ? 'Sign in to your private workspace.' : 'Record meetings, track follow-ups, and review sample conversations.'}
         </p>
-        {mode === 'demo' && <p className="login-description">No sign-up or password. Use fictional data only.</p>}
+        {mode === 'demo' && <p className="login-description">No sign-up or password.</p>}
         {error && <div className="alert" role="alert">{error}</div>}
         <form onSubmit={submit}>
           {mode === 'admin' && (
