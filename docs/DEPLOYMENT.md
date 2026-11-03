@@ -1,6 +1,6 @@
 # Deploy the recruiter demo
 
-The Docker image serves the built React frontend and Flask API from one origin.
+The Docker image serves the built React frontend and Express API from one origin.
 It requires a reachable PostgreSQL database. The PostgreSQL container on your
 laptop is for local development and is not reachable by a hosting server.
 
@@ -13,7 +13,7 @@ open the backend's root URL to use the same-origin version:
 cd frontend
 npm.cmd run build
 cd ..
-.\.venv\Scripts\python.exe backend\app.py
+npm.cmd start
 ```
 
 Health is at `/api/health`; `/` serves the website after a frontend build.
@@ -39,7 +39,7 @@ Never copy the short local development password into a public service.
 Check configuration locally without accessing any meeting data:
 
 ```powershell
-.\.venv\Scripts\python.exe -m backend.config --public
+npm.cmd run check:config -- --public
 ```
 
 This checks local environment settings, not Render's settings or database
@@ -65,16 +65,13 @@ connectivity. Errors name every invalid setting and never print its value.
    need a reachable local/private inference service; they are never automatically
    sent to OpenAI when unavailable.
 
-If the existing service uses Render's native Python runtime, adding `render.yaml`
-or a Dockerfile does not change that service's runtime automatically. From the
-repository root, install with `pip install -r requirements-lock.txt` and start
-with `gunicorn backend.app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 240`.
-For a service whose Root Directory is `backend`, use
-`pip install -r ../requirements-lock.txt` and `gunicorn app:app` with the same
-server flags. Native API-only hosting also needs a separately built frontend:
-set its `VITE_API_BASE_URL` to the API's HTTPS URL ending in `/api`, and set the
-API's `CORS_ORIGINS` and `FRONTEND_URL` to that frontend's HTTPS origin.
-The Docker setup builds both parts and serves them from one origin.
+If the existing service uses Render's native Python runtime, this Dockerfile does
+not change its runtime automatically. Switch to the Docker configuration, or a
+Node runtime with `npm ci && npm --prefix frontend ci && npm run build` as the
+build command and `npm start` as the start command, from the repository root.
+Do not keep the old Gunicorn start command. Preserve the existing database URL
+and secrets. Sign in again after cutover; old Flask browser tokens expire at the
+migration boundary. No deployment is performed by local source changes.
 
 After saving the required settings and publishing the code, redeploy the existing
 service and verify `/api/health`, password-free demo creation, and Admin sign-in.
@@ -89,14 +86,11 @@ complete connection URL from Neon's Connect dialog into the Render service's
 a `psql` command or an environment-variable assignment. The app creates its
 tables on startup and seeds fictional records when a visitor opens a demo.
 
-Standard `postgres://` and `postgresql://` URLs are normalized to
-`postgresql+psycopg2://` to select the driver installed by this project's
-requirements. This avoids SQLAlchemy 2.1 selecting the separate `psycopg`
-driver for a bare `postgresql://` URL. Credentials and SSL parameters are
-preserved. The configuration checker applies the same normalization.
+Standard `postgres://` and `postgresql://` URLs are accepted directly by
+node-postgres. Legacy `postgresql+psycopg2://` URLs are normalized without
+changing credentials or SSL query parameters. TLS verification is not disabled.
 
-Sources: [Neon connection strings](https://neon.com/docs/connect/connect-from-any-app),
-[SQLAlchemy PostgreSQL drivers](https://docs.sqlalchemy.org/en/21/dialects/postgresql.html).
+See [migration details](DEVELOPMENT.md#migration-from-flask) before switching.
 
 ## Operational limits
 
@@ -108,8 +102,7 @@ Sources: [Neon connection strings](https://neon.com/docs/connect/connect-from-an
 - OpenAI demo generation defaults to five attempts per session and fifty per
   rolling 24 hours across the server. Failed provider attempts count toward the
   allowance. Also set provider-side budget alerts/limits in your OpenAI project.
-- Gmail polling runs in one process. The image uses one Gunicorn worker and four
-  threads. PostgreSQL locks serialize sync and quota reservation. A future larger
+- Gmail polling runs in one process. The image uses one Node.js process. PostgreSQL locks serialize sync and quota reservation. A future larger
   deployment should move polling into a dedicated worker/queue.
 - Render's free web service sleeps after idle periods, so polling pauses while
   it is asleep and resumes after startup. Always-on email monitoring needs an
@@ -126,6 +119,6 @@ Sources: [Neon connection strings](https://neon.com/docs/connect/connect-from-an
 - Local-only inference does not make the entire hosted application local. The
   database and Gmail access need their own access controls and deployment policy.
 
-Sources: [Render Flask deployment](https://render.com/docs/deploy-flask),
-[OpenAI Python SDK](https://developers.openai.com/api/docs/libraries),
+Sources: [Render Node deployment](https://render.com/docs/deploy-node-express-app),
+[OpenAI API](https://developers.openai.com/api/docs),
 [Ollama deployment and privacy](https://docs.ollama.com/faq).

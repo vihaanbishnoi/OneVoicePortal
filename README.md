@@ -2,7 +2,7 @@
 
 A full-stack application for turning employee meeting discussions into trackable actions. OneVoice brings meeting records, owners, deadlines, follow-up conversations, and AI-assisted drafting into one workspace.
 
-**[Open the demo](https://onevoiceportal.onrender.com/)** · [Frontend source](frontend/src) · [Backend source](backend)
+**[Open the demo](https://onevoiceportal.onrender.com/)** · [Frontend source](frontend/src) · [Backend source](server)
 
 Select **Open demo** to get an editable workspace with fictional meetings and conversations. No account or password is required. Each visitor gets a separate sample workspace for 12 hours; please use fictional data only. The hosted app may take a moment to start after being idle.
 
@@ -34,12 +34,12 @@ AI generation depends on the configured provider and usage allowance. Generated 
 
 ## How it is built
 
-The React frontend calls a Flask API, which stores meeting and action data in PostgreSQL. The Docker image builds and serves the frontend and API from a single origin.
+The React frontend calls an Express API, which stores meeting and action data in PostgreSQL. The Docker image builds and serves the frontend and API from a single origin.
 
 | Layer | Technology |
 | --- | --- |
 | Frontend | React, React Router, Vite, CSS |
-| Backend | Python, Flask, SQLAlchemy |
+| Backend | Node.js, Express, node-postgres |
 | Database | PostgreSQL |
 | AI | OpenAI for fictional demo conversations; Ollama for private workspace conversations |
 | Email integration | Gmail API and OAuth |
@@ -55,11 +55,11 @@ The React frontend calls a Flask API, which stores meeting and action data in Po
 
 ## Validation and source
 
-Automated backend tests cover authentication, demo isolation, editing limits, exports, Gmail integration behavior, AI routing, migrations, and startup configuration, including PostgreSQL driver selection. Frontend lint and the production build also pass. The default test suite uses an isolated database and mocked external providers; model quality is assessed separately.
+Automated backend tests cover authentication, demo isolation, editing limits, exports, Gmail integration behavior, AI routing, migrations, and startup configuration, including PostgreSQL URL compatibility. Frontend lint and the production build also pass. The Node test suite uses an isolated PostgreSQL engine (PGlite) and mocked external providers; model quality is assessed separately.
 
-- [Authentication tests](tests/test_auth.py)
-- [Workspace and integration tests](tests/test_workspace.py)
-- [Deployment configuration tests](tests/test_config.py)
+- [API and authentication tests](server/tests/api.test.js)
+- [Security and provider tests](server/tests/security.test.js)
+- [Startup configuration](server/config.js)
 - [AI evaluation approach](docs/AI_EVALUATION.md)
 
 For a closer technical review, see the [developer guide](docs/DEVELOPMENT.md), [deployment notes](docs/DEPLOYMENT.md), and [Gmail integration setup](docs/GMAIL_SETUP.md).

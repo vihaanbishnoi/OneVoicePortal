@@ -75,7 +75,7 @@ vacancies or campus JDs. Direct page access can fail after postings expire.
   remain explicit learning priorities regardless of that search limitation.
 
 These examples do not establish a company-wide frequency ranking. In particular,
-the Python/Flask project demonstrates transferable engineering skills; it does
+the project demonstrates transferable engineering skills; it does
 not demonstrate Java/Spring proficiency by itself.
 
 ## Project priorities
@@ -83,10 +83,11 @@ not demonstrate Java/Spring proficiency by itself.
 ### 1. Must learn and implement over the project
 
 - Understand the existing application and close confirmed HR workflow gaps.
-- Python fundamentals, functions, data structures, exceptions, readable modules,
-  and appropriate use of classes. Discuss complexity using actual code.
+- JavaScript fundamentals, async/await, functions, data structures, exceptions,
+  and readable Node.js modules for the application. Retain Python fundamentals
+  for the separate DS/ML analysis work. Discuss complexity using actual code.
 - HTTP/JSON APIs, validation, consistent errors, authentication, authorization,
-  and frontend/backend integration. Keep Flask unless a concrete need changes it.
+  and frontend/backend integration using Node.js and Express.
 - PostgreSQL and SQL: relationships, constraints, joins, aggregation,
   transactions, migrations, and measured query performance.
 - Meaningful unit and integration tests for business rules, permissions,
@@ -184,7 +185,7 @@ Understanding an existing feature does not mean claiming original authorship.
 
 | Workflow | Concepts to learn in context |
 | --- | --- |
-| Create and retrieve a meeting | HTTP, JSON, Flask routes, validation, status codes, database sessions and commits |
+| Create and retrieve a meeting | HTTP, JSON, Express routes, validation, status codes, SQL queries and transactions |
 | Attach actions and choose an owner | Primary and foreign keys, one-to-many relationships, SQL joins, data integrity |
 | Log in and access records | Password hashing, signed tokens, authentication versus authorization, permission tests |
 | Add follow-up remarks and change status | Business rules, update APIs, history, transactions, failure handling |
@@ -215,13 +216,18 @@ the revised demo, UI, export, activity, email, AI, and deployment-preparation
 changes with "Do everything now." Use subsequent steps to explain
 what was changed and verify their understanding before expanding the scope.
 
-The checked-in application uses React, Flask, SQLAlchemy, and PostgreSQL.
+On 4 November 2026, the user explicitly authorized replacing Flask with Node.js
+and Express while retaining React and PostgreSQL. The application now uses PERN,
+not MERN: MongoDB is not part of this project. The user supplied a role skills list
+including Full Stack/MERN, Python/SQL/data engineering, AWS/GCP, and Drupal; this
+project covers only part of that list and does not demonstrate every listed skill.
+Legacy Python code remains for migration reference; the active backend is server/.
 The README links a Render demo; its current availability and deployed code
 version have not been verified. Existing code is a learning baseline, not proof
 that every workflow is correct or complete.
 
 First lesson: trace Create Meeting from NewMeeting.jsx through api.js to
-POST /api/meetings in backend/app.py and back to the meeting detail page.
+POST /api/meetings in server/app.js and back to the meeting detail page.
 
 Outstanding HR input: the fourth meeting type. The supplied DS Intern document
 guides the DS plan; the exact SWE campus JD and confirmation of final campus
