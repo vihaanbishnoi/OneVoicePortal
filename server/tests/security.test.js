@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import {
+  randomBytes,
+  scryptSync,
+  pbkdf2Sync,
+  createDecipheriv,
+  createHmac,
+} from 'node:crypto';
 import {
   checkPassword,
   hashPassword,
@@ -11,30 +17,71 @@ import { settings } from '../config.js';
 import { generate } from '../ai.js';
 import { messageBody } from '../gmail.js';
 
-test('Python-generated password hashes and Fernet credentials survive migration', async () => {
-  const legacy = JSON.parse(
-    await readFile(new URL('./legacy-fixture.json', import.meta.url)),
-  );
-  assert.equal(await checkPassword(legacy.hash, legacy.password), true);
-  assert.equal(await checkPassword(legacy.hash, 'wrong'), false);
+test('Werkzeug-format password hashes remain compatible', async () => {
+  const password = 'migration-test-password';
+  const salt = randomBytes(12).toString('hex');
+  const derived = scryptSync(password, salt, 64, {
+    N: 32768,
+    r: 8,
+    p: 1,
+    maxmem: 64 * 1024 * 1024,
+  });
+  const legacyHash = `scrypt:32768:8:1$${salt}$${derived.toString('hex')}`;
+  assert.equal(await checkPassword(legacyHash, password), true);
+  assert.equal(await checkPassword(legacyHash, 'wrong'), false);
+  const pbkdf = pbkdf2Sync(password, salt, 1000, 32, 'sha256');
   assert.equal(
-    await checkPassword(await hashPassword('new-password'), 'new-password'),
+    await checkPassword(
+      `pbkdf2:sha256:1000$${salt}$${pbkdf.toString('hex')}`,
+      password,
+    ),
     true,
   );
-  assert.deepEqual(decryptCredentials(legacy.token, legacy.key), {
-    refresh_token: 'fictional-refresh-token',
-  });
-  const encrypted = encryptCredentials(
-    { refresh_token: 'new-fictional-token' },
-    legacy.key,
+  assert.equal(
+    await checkPassword(await hashPassword(password), password),
+    true,
   );
-  assert.deepEqual(decryptCredentials(encrypted, legacy.key), {
-    refresh_token: 'new-fictional-token',
-  });
-  const bytes = Buffer.from(encrypted, 'base64url');
-  bytes[30] ^= 1;
+});
+
+test('credentials use authenticated Fernet format without stored test secrets', () => {
+  const key = randomBytes(32);
+  const encodedKey = key.toString('base64url');
+  const credentials = { refresh_token: 'fictional-refresh-token' };
+  const encrypted = encryptCredentials(credentials, encodedKey);
+  assert.deepEqual(decryptCredentials(encrypted, encodedKey), credentials);
+
+  // Check the wire format independently of decryptCredentials, including padding
+  // required by Python cryptography when reading existing Gmail connections.
+  assert.equal(encrypted.length % 4, 0);
+  const token = Buffer.from(encrypted, 'base64url');
+  assert.equal(token[0], 0x80);
+  assert.ok(Math.abs(Number(token.readBigUInt64BE(1)) - Date.now() / 1000) < 5);
+  assert.deepEqual(
+    createHmac('sha256', key.subarray(0, 16))
+      .update(token.subarray(0, -32))
+      .digest(),
+    token.subarray(-32),
+  );
+  const decipher = createDecipheriv(
+    'aes-128-cbc',
+    key.subarray(16),
+    token.subarray(9, 25),
+  );
+  assert.deepEqual(
+    JSON.parse(
+      Buffer.concat([
+        decipher.update(token.subarray(25, -32)),
+        decipher.final(),
+      ]).toString(),
+    ),
+    credentials,
+  );
   assert.throws(() =>
-    decryptCredentials(bytes.toString('base64url'), legacy.key),
+    decryptCredentials(encrypted, randomBytes(32).toString('base64url')),
+  );
+  token[30] ^= 1;
+  assert.throws(() =>
+    decryptCredentials(token.toString('base64url'), encodedKey),
   );
 });
 

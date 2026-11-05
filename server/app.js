@@ -851,7 +851,6 @@ export function createApp(pool, config, services = {}) {
     require,
     audit,
     getAction,
-    touch,
     eligible,
     job,
     services,

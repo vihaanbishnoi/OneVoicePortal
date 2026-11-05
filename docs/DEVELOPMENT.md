@@ -54,6 +54,10 @@ The Express backend retains the existing table and column names and runs additiv
 
 The only new table is `oauth_states`, for short-lived, single-use Gmail connection requests. No existing business records are dropped or copied. Back up the database before deploying and verify the new backend against a restored copy first. Browser tokens from Flask are not accepted: sign in again after switching, and restart any pending Gmail connection flow.
 
-`backend/`, Python requirements, and `tests/` remain as the legacy implementation/reference for rollback. They are not used by `npm start` or the Docker image. Do not run both backends against the same database during cutover. PostgreSQL advisory locks serialize quota reservations and Gmail sync among Node processes.
+`backend/`, Python requirements, and `tests/` are retained until the existing Render API has successfully switched from its Python runtime to Node. The latest supplied deployment logs still run `backend.server`, so deleting these files now would break subsequent Python deployments. They are not used by `npm start` or the Docker image. Do not run both backends against the same database during cutover. PostgreSQL advisory locks serialize quota reservations and Gmail sync among Node processes.
 
 Demo AI uses OpenAI only for fictional demo workspaces. Private AI stays on Ollama with no cloud fallback. Gmail supports imports and unsent drafts, not sending. See [Gmail setup](GMAIL_SETUP.md) and [AI evaluation](AI_EVALUATION.md).
+
+## Security test data
+
+Security tests generate encryption keys, password salts, hashes, and encrypted tokens in memory for each run. Do not commit generated credential fixtures. The synthetic fixture previously stored in `server/tests/legacy-fixture.json` was removed after GitGuardian incident #39531385; it contained test-only data and was never used by application configuration. Removing it from the current tree does not remove the historical commit or close the GitGuardian incident.

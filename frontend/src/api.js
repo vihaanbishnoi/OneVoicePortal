@@ -44,17 +44,12 @@ export const linkGmailThread = (id, threadId) => post(`/logs/${id}/gmail-link`, 
 export const createGmailDraft = (id, data) => post(`/logs/${id}/gmail-draft`, data);
 export const addConversationMessage = (id, data) => post(`/logs/${id}/messages`, data);
 export const generateAI = (id, data) => post(`/logs/${id}/ai`, data);
-export const fetchDashboard = () => request('/dashboard');
 export const fetchCalendar = (params = {}) => request(`/calendar?${new URLSearchParams(params)}`);
 export const fetchNotifications = () => request('/notifications');
 export const readNotification = id => request(`/notifications/${id}/read`, { method: 'POST' });
-export const fetchActions = () => request('/actions');
-export const fetchUsers = () => request('/users');
-export const fetchSummary = () => request('/reports/summary');
 export const fetchMeetings = () => request('/meetings');
 export const fetchMeeting = id => request(`/meetings/${id}`);
 export const fetchMeetingLog = id => request(`/logs/${id}`);
 export const createMeeting = data => request('/meetings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
 export const addMeetingLog = (meetingId, data) => request(`/meetings/${meetingId}/logs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
 export const updateRemarks = (logId, data) => request(`/logs/${logId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-export const searchReports = () => fetchMeetings();
