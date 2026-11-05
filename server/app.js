@@ -6,18 +6,18 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import { zipSync, strToU8 } from 'fflate';
-import { transaction, rows, one, insert } from './db.js';
+import { transaction, rows, one, insert, touchAction } from './db.js';
 import {
   ADMIN_EMAIL,
   SHARED_EMAIL,
   DEMO_EMAIL,
   version,
   checkPassword,
-  hashPassword,
   safeEqual,
 } from './security.js';
 import {
   fail,
+  validId,
   field,
   date,
   email,
@@ -31,7 +31,7 @@ import {
   csv,
 } from './domain.js';
 import { generate } from './ai.js';
-import { gmailRoutes, syncGmail } from './gmail.js';
+import { gmailRoutes } from './gmail.js';
 
 export function createApp(pool, config, services = {}) {
   const app = express();
@@ -128,7 +128,7 @@ export function createApp(pool, config, services = {}) {
       detail: detail.slice(0, 300),
     });
   const getMeeting = async (db, req, id) => {
-    if (!/^\d+$/.test(String(id))) fail('Meeting not found', 404);
+    if (!validId(id)) fail('Meeting not found', 404);
     const m = await one(
       db,
       'SELECT * FROM meetings WHERE id=$1 AND demo_session_id IS NOT DISTINCT FROM $2',
@@ -138,7 +138,7 @@ export function createApp(pool, config, services = {}) {
     return m;
   };
   const getAction = async (db, req, id) => {
-    if (!/^\d+$/.test(String(id))) fail('Action not found', 404);
+    if (!validId(id)) fail('Action not found', 404);
     const a = await one(
       db,
       `SELECT a.*, u.name AS user_owner_name FROM actions a JOIN meetings m ON m.id=a.meeting_id LEFT JOIN users u ON u.id=a.owner_id WHERE a.id=$1 AND m.demo_session_id IS NOT DISTINCT FROM $2`,
@@ -146,12 +146,6 @@ export function createApp(pool, config, services = {}) {
     );
     if (!a) fail('Action not found', 404);
     return a;
-  };
-  const touch = async (db, a) => {
-    await db.query('UPDATE actions SET updated_at=NOW() WHERE id=$1', [a.id]);
-    await db.query('UPDATE meetings SET updated_at=NOW() WHERE id=$1', [
-      a.meeting_id,
-    ]);
   };
   const limit = (name, fallback) => Number(config.env[name] ?? fallback);
   const guard = async (db, req) => {
@@ -203,7 +197,7 @@ export function createApp(pool, config, services = {}) {
       messages: (
         await rows(
           db,
-          'SELECT * FROM conversation_messages WHERE action_id=$1 ORDER BY sent_at NULLS FIRST,id',
+          'SELECT * FROM conversation_messages WHERE action_id=$1 ORDER BY COALESCE(sent_at, recorded_at),id',
           [a.id],
         )
       ).map(messageJson),
@@ -235,6 +229,18 @@ export function createApp(pool, config, services = {}) {
       mode === 'admin'
         ? field(req.body, 'email', 255, false).toLowerCase()
         : SHARED_EMAIL;
+    await transaction(pool, async (db) => {
+      await db.query('SELECT pg_advisory_xact_lock(70107)');
+      const attempts = await one(
+        db,
+        "SELECT COUNT(*) AS n FROM activity WHERE event='Sign-in attempted' AND created_at >= NOW()-INTERVAL '1 minute'",
+      );
+      if (Number(attempts.n) >= 30) {
+        res.set('Retry-After', '60');
+        fail('Too many sign-in attempts. Please wait a minute.', 429);
+      }
+      await audit(db, req, 'Sign-in attempted');
+    });
     const user = await one(pool, 'SELECT * FROM users WHERE email=$1', [
       address,
     ]);
@@ -349,37 +355,6 @@ export function createApp(pool, config, services = {}) {
   app.get('/api/auth/me', require(), (req, res) =>
     res.json(userJson(req.user, req.demo)),
   );
-  app.get('/api/users', require('hr_admin', 'hr_team'), async (req, res) =>
-    res.json(
-      (
-        await rows(
-          pool,
-          "SELECT * FROM users WHERE active=true AND role <> 'demo' ORDER BY name",
-        )
-      ).map((u) => userJson(u)),
-    ),
-  );
-  app.post('/api/users', require('hr_admin'), async (req, res) => {
-    const name = field(req.body, 'name');
-    const address = email(field(req.body, 'email', 255)).toLowerCase();
-    const password = field(req.body, 'password', 256);
-    const role = req.body.role;
-    if (!['hr_admin', 'hr_team', 'action_owner', 'viewer'].includes(role))
-      fail('Choose a valid role');
-    const result = await transaction(pool, async (db) => {
-      if (await one(db, 'SELECT id FROM users WHERE email=$1', [address]))
-        fail('Email already exists', 409);
-      const u = await insert(db, 'users', {
-        name,
-        email: address,
-        role,
-        password_hash: await hashPassword(password),
-      });
-      await audit(db, req, 'Account created', role);
-      return userJson(u);
-    });
-    res.status(201).json(result);
-  });
   app.get('/api/meetings', require(), async (req, res) =>
     res.json(
       (
@@ -406,13 +381,14 @@ export function createApp(pool, config, services = {}) {
       fail('Enter a meeting date and participant count from 1 to 10,000');
     if (!Array.isArray(participants) || participants.length > count)
       fail('Participant details must match the participant count');
-    for (const p of participants) {
+    const normalizedParticipants = participants.map((p) => {
       if (!p || typeof p !== 'object' || Array.isArray(p))
         fail('Each participant needs a name or employee ID');
       const name = field(p, 'name', 120, false);
       const empid = field(p, 'empid', 80, false);
       if (!name && !empid) fail('Each participant needs a name or employee ID');
-    }
+      return { name, empid };
+    });
     const result = await transaction(pool, async (db) => {
       await guard(db, req);
       if (
@@ -432,7 +408,7 @@ export function createApp(pool, config, services = {}) {
         ...values,
         date: when,
         num_participants: count,
-        participants_list: JSON.stringify(participants),
+        participants_list: JSON.stringify(normalizedParticipants),
         demo_session_id: req.demo,
       });
       await audit(db, req, 'Meeting recorded', `Meeting #${m.id}`);
@@ -497,7 +473,7 @@ export function createApp(pool, config, services = {}) {
         contact_email: email(data.contact_email),
         due_date: date(data.due_date),
       });
-      await touch(db, a);
+      await touchAction(db, a);
       await audit(db, req, 'Action recorded', `Action #${a.id}`);
       return actionJson(a);
     });
@@ -558,7 +534,7 @@ export function createApp(pool, config, services = {}) {
           `UPDATE actions SET ${keys.map((k, i) => `${k}=$${i + 1}`).join(',')} WHERE id=$${keys.length + 1}`,
           [...Object.values(changes), a.id],
         );
-      await touch(db, a);
+      await touchAction(db, a);
       await audit(db, req, 'Follow-up updated', `Action #${a.id}`);
       return actionJson(
         await getAction(db, req, a.id),
@@ -595,7 +571,7 @@ export function createApp(pool, config, services = {}) {
         sender: field(req.body, 'sender', 255, false),
         subject: field(req.body, 'subject', 500, false),
       });
-      await touch(db, a);
+      await touchAction(db, a);
       if (direction === 'incoming')
         await insert(db, 'notifications', {
           action_id: a.id,
@@ -720,7 +696,7 @@ export function createApp(pool, config, services = {}) {
     ),
   );
   app.post('/api/notifications/:id/read', require(), async (req, res) => {
-    if (!/^\d+$/.test(req.params.id)) fail('Notification not found', 404);
+    if (!validId(req.params.id)) fail('Notification not found', 404);
     const result = await one(
       pool,
       `UPDATE notifications SET read=true WHERE id=$1 AND demo_session_id IS NOT DISTINCT FROM $2 AND ($2::text IS NOT NULL OR user_id IS NULL OR user_id=$3) RETURNING id`,
@@ -740,7 +716,7 @@ export function createApp(pool, config, services = {}) {
       const ids = meetings.map((m) => m.id);
       const actions = await rows(
         db,
-        'SELECT * FROM actions WHERE meeting_id=ANY($1::int[]) ORDER BY id',
+        'SELECT a.*,u.name AS user_owner_name FROM actions a LEFT JOIN users u ON u.id=a.owner_id WHERE a.meeting_id=ANY($1::int[]) ORDER BY a.id',
         [ids],
       );
       const actionIds = actions.map((a) => a.id);
@@ -753,7 +729,10 @@ export function createApp(pool, config, services = {}) {
         [
           'actions',
           'id meeting_id discussion_point category priority action_description owner_name contact_person contact_email status due_date created_at updated_at',
-          actions,
+          actions.map((a) => ({
+            ...a,
+            owner_name: a.owner_name || a.user_owner_name || '',
+          })),
         ],
         [
           'followups',
@@ -882,20 +861,16 @@ export function createApp(pool, config, services = {}) {
     const status = error.status || (error.code === '23505' ? 409 : 500);
     if (status === 500)
       console.error('Request failed:', error.code || error.name);
-    res
-      .status(status)
-      .json({
-        error:
-          status === 500
-            ? 'The workspace is temporarily unavailable. Please try again.'
-            : error.type === 'entity.parse.failed'
-              ? 'Request body must be a JSON object'
-              : error.code === '23505'
-                ? 'Record already exists'
-                : error.message,
-      });
+    res.status(status).json({
+      error:
+        status === 500
+          ? 'The workspace is temporarily unavailable. Please try again.'
+          : error.type === 'entity.parse.failed'
+            ? 'Request body must be a JSON object'
+            : error.code === '23505'
+              ? 'Record already exists'
+              : error.message,
+    });
   });
   return app;
 }
-
-export { syncGmail };

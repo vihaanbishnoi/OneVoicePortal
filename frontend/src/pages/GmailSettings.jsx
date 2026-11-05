@@ -11,7 +11,15 @@ export default function GmailSettings() {
   async function perform(kind) {
     setBusy(true); setError(''); setNotice('');
     try {
-      if (kind === 'connect') { const result = await startGmailConnect(); window.location.assign(result.url); return; }
+      if (kind === 'connect') {
+        const result = await startGmailConnect();
+        const form = document.createElement('form');
+        form.method = 'POST'; form.action = result.url;
+        const state = document.createElement('input');
+        state.type = 'hidden'; state.name = 'state'; state.value = result.state;
+        form.appendChild(state); document.body.appendChild(form);
+        form.submit(); form.remove(); return;
+      }
       if (kind === 'disconnect') { await disconnectGmail(); setNotice('The portal no longer has a saved Gmail connection.'); }
       if (kind === 'sync') { const result = await syncGmail(); setNotice(`${result.new_replies} new replies imported.`); }
       setStatus(await fetchGmailStatus());

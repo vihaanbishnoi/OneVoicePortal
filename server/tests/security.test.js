@@ -15,7 +15,7 @@ import {
 } from '../security.js';
 import { settings } from '../config.js';
 import { generate } from '../ai.js';
-import { messageBody } from '../gmail.js';
+import { messageBody, encodedSubject } from '../gmail.js';
 
 test('Werkzeug-format password hashes remain compatible', async () => {
   const password = 'migration-test-password';
@@ -181,4 +181,59 @@ test('Gmail MIME extraction prefers plain text and excludes attachments', () => 
     messageBody(part('text/html', '<p>HTML message</p>')),
     'HTML message',
   );
+});
+
+test('startup rejects malformed quotas and runtime numbers without exposing values', () => {
+  const env = {
+    DATABASE_URL: 'postgresql://localhost/test',
+    SECRET_KEY: 'test',
+    ADMIN_PASSWORD: 'test',
+  };
+  for (const name of [
+    'DEMO_SESSION_WRITE_LIMIT',
+    'DEMO_DAILY_WRITE_LIMIT',
+    'DEMO_DAILY_SESSION_LIMIT',
+    'DEMO_AI_SESSION_LIMIT',
+    'DEMO_AI_DAILY_LIMIT',
+    'GMAIL_POLL_SECONDS',
+    'OLLAMA_CONTEXT',
+    'PORT',
+  ]) {
+    for (const value of ['', 'NaN', '-1', '1.5', 'Infinity', '2147483648']) {
+      assert.throws(
+        () => settings({ ...env, [name]: value }),
+        new RegExp(name),
+      );
+    }
+  }
+  assert.doesNotThrow(() =>
+    settings({
+      ...env,
+      DEMO_AI_DAILY_LIMIT: '0',
+      GMAIL_POLL_SECONDS: '0',
+    }),
+  );
+  assert.throws(() => settings({ ...env, PORT: '65536' }), /PORT/);
+  assert.throws(
+    () => settings({ ...env, OLLAMA_CONTEXT: '0' }),
+    /OLLAMA_CONTEXT/,
+  );
+  assert.throws(
+    () => settings({ ...env, ADMIN_PASSWORD: 'a'.repeat(257) }),
+    /ADMIN_PASSWORD/,
+  );
+});
+
+test('long Unicode subjects fold safely and preserve text', () => {
+  const subject = 'Follow up 😀 résumé '.repeat(30);
+  const header = encodedSubject(subject);
+  const lines = header.split('\r\n');
+  assert.ok(lines.every((line) => line.length <= 69));
+  const decoded = lines
+    .map((line) =>
+      Buffer.from(line.trim().slice(10, -2), 'base64').toString('utf8'),
+    )
+    .join('');
+  assert.equal(decoded, subject);
+  assert.ok(!encodedSubject('Hello\r\nBcc: test').includes('\n'));
 });

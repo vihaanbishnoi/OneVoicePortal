@@ -22,6 +22,32 @@ export function settings(env = process.env) {
       .map((s) => s.trim()),
   };
   const errors = [];
+  for (const name of [
+    'DEMO_SESSION_WRITE_LIMIT',
+    'DEMO_DAILY_WRITE_LIMIT',
+    'DEMO_DAILY_SESSION_LIMIT',
+    'DEMO_AI_SESSION_LIMIT',
+    'DEMO_AI_DAILY_LIMIT',
+    'GMAIL_POLL_SECONDS',
+    'OLLAMA_CONTEXT',
+    'PORT',
+  ]) {
+    if (env[name] === undefined) continue;
+    const minimum = ['PORT', 'OLLAMA_CONTEXT'].includes(name) ? 1 : 0;
+    const maximum = name === 'PORT' ? 65535 : 2147483647;
+    const value = Number(env[name]);
+    if (
+      !/^\d+$/.test(String(env[name])) ||
+      !Number.isSafeInteger(value) ||
+      value < minimum ||
+      value > maximum
+    )
+      errors.push(`${name} must be an integer from ${minimum} to ${maximum}`);
+  }
+  if (config.adminPassword?.length > 256)
+    errors.push('ADMIN_PASSWORD must be at most 256 characters');
+  if (config.sharedLogin && !env.HR_TEAM_PASSWORD)
+    errors.push('HR_TEAM_PASSWORD is required when shared login is enabled');
   if (!/^postgres(?:ql)?:\/\//.test(config.databaseUrl))
     errors.push('DATABASE_URL must be a PostgreSQL connection URL');
   if (!config.secret || (config.public && config.secret.length < 32))

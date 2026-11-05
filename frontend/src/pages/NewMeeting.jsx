@@ -25,9 +25,7 @@ export default function NewMeeting() {
   };
 
   const handleParticipantChange = (index, field, value) => {
-    const updated = [...participants];
-    updated[index][field] = value;
-    setParticipants(updated);
+    setParticipants(current => current.map((participant, i) => i === index ? { ...participant, [field]: value } : participant));
   };
 
   const handleSubmit = async (e) => {
@@ -141,14 +139,14 @@ export default function NewMeeting() {
                   <div key={idx} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'center' }}>
                     <input
                       type="text"
-                      placeholder="Name"
+                      placeholder="Name" aria-label={`Participant ${idx + 1} name`} maxLength={120}
                       value={p.name}
                       onChange={(e) => handleParticipantChange(idx, 'name', e.target.value)}
                       style={{ flex: 2, padding: '6px 10px', fontSize: '0.85rem' }}
                     />
                     <input
                       type="text"
-                      placeholder="Employee ID"
+                      placeholder="Employee ID" aria-label={`Participant ${idx + 1} employee ID`} maxLength={80}
                       value={p.empid}
                       onChange={(e) => handleParticipantChange(idx, 'empid', e.target.value)}
                       style={{ flex: 1, padding: '6px 10px', fontSize: '0.85rem' }}

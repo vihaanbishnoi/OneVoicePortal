@@ -29,7 +29,10 @@ before(async () => {
   admin = (
     await api
       .post('/api/auth/login')
-      .send({ email: 'vihaan4263@gmail.com', password: 'test-admin-password' })
+      .send({
+        email: 'vihaan4263@gmail.com',
+        password: 'test-admin-password',
+      })
       .expect(200)
   ).body;
 });
@@ -52,7 +55,7 @@ test('authentication rejects anonymous, forged, expired, malformed and unauthori
     .set('Authorization', `Bearer ${expired}`)
     .expect(401);
   await api.get('/api/admin/activity').set(auth(demo)).expect(403);
-  await api.get('/api/users').set(auth(demo)).expect(403);
+  await api.get('/api/users').set(auth(demo)).expect(404);
   await api
     .post('/api/auth/login')
     .send({ mode: 'hr_team', password: 'x' })
@@ -144,7 +147,11 @@ test('meeting, action, remark, conversation, calendar, AI and ZIP workflows reta
   await api
     .patch(`/api/logs/${a.id}`)
     .set(auth(demo))
-    .send({ status: 'In Progress', priority: 'High', remark: 'Review started' })
+    .send({
+      status: 'In Progress',
+      priority: 'High',
+      remark: 'Review started',
+    })
     .expect(200);
   const msg = (
     await api
@@ -294,6 +301,87 @@ test('Gmail and jobs remain admin-only; missing setup is explicit', async () => 
   await api.get('/api/not-real').expect(404);
 });
 
+test('record IDs are bounded, participants normalized, and year zero rejected', async () => {
+  for (const id of [
+    '2147483648',
+    '999999999999999999999999',
+    '0',
+    '-1',
+    '1.2',
+  ]) {
+    await api
+      .get('/api/meetings/' + id)
+      .set(auth(admin))
+      .expect(404);
+    await api
+      .get('/api/logs/' + id)
+      .set(auth(admin))
+      .expect(404);
+    await api
+      .post('/api/notifications/' + id + '/read')
+      .set(auth(admin))
+      .expect(404);
+  }
+  const data = {
+    forum_type: 'Test',
+    department: 'Test',
+    facilitator: 'Test',
+    date: '2026-11-05',
+    num_participants: 1,
+    participants_list: [{ name: '  Alex  ', empid: ' E1 ', extra: 'discard' }],
+  };
+  const response = await api
+    .post('/api/meetings')
+    .set(auth(admin))
+    .send(data)
+    .expect(201);
+  assert.deepEqual(response.body.participants_list, [
+    { name: 'Alex', empid: 'E1' },
+  ]);
+  await api
+    .post('/api/meetings')
+    .set(auth(admin))
+    .send({ ...data, date: '0000-01-01' })
+    .expect(400);
+  await api
+    .post('/api/users')
+    .set(auth(admin))
+    .send({ name: 'Unsupported account' })
+    .expect(404);
+});
+
+test('pasted and imported messages appear in chronological order', async () => {
+  const a = (await api.get('/api/actions').set(auth(other)).expect(200))
+    .body[0];
+  await f.pool.query('DELETE FROM conversation_messages WHERE action_id=$1', [
+    a.id,
+  ]);
+  await insert(f.pool, 'conversation_messages', {
+    action_id: a.id,
+    body: 'Later paste',
+    sender: 'Test',
+    direction: 'incoming',
+    source: 'manual',
+    recorded_at: new Date('2026-11-05T10:00:00Z'),
+  });
+  await insert(f.pool, 'conversation_messages', {
+    action_id: a.id,
+    body: 'Earlier email',
+    sender: 'Test',
+    direction: 'incoming',
+    source: 'gmail',
+    sent_at: new Date('2026-11-04T10:00:00Z'),
+  });
+  const response = await api
+    .get('/api/logs/' + a.id)
+    .set(auth(other))
+    .expect(200);
+  assert.deepEqual(
+    response.body.messages.map((m) => m.body),
+    ['Earlier email', 'Later paste'],
+  );
+});
+
 test('additive bootstrap preserves records and null historical timestamps; password changes revoke sessions', async () => {
   const m = (await api.get('/api/meetings').set(auth(demo))).body[0];
   await f.pool.query(
@@ -309,11 +397,17 @@ test('additive bootstrap preserves records and null historical timestamps; passw
     null,
   );
   await api.get('/api/auth/me').set(auth(admin)).expect(200);
-  await bootstrap(f.pool, { ...f.config, adminPassword: 'new-admin-password' });
+  await bootstrap(f.pool, {
+    ...f.config,
+    adminPassword: 'new-admin-password',
+  });
   await api.get('/api/auth/me').set(auth(admin)).expect(401);
   await api
     .post('/api/auth/login')
-    .send({ email: 'vihaan4263@gmail.com', password: 'new-admin-password' })
+    .send({
+      email: 'vihaan4263@gmail.com',
+      password: 'new-admin-password',
+    })
     .expect(200);
   await f.pool.query(
     "UPDATE demo_sessions SET expires_at=NOW()-INTERVAL '1 second' WHERE id=$1",
@@ -364,5 +458,31 @@ test('older PostgreSQL schema upgrades add columns without replacing existing re
     assert.equal(restoredAction.owner_name, '');
   } finally {
     await legacy.pool.end();
+  }
+});
+
+test('login attempts are bounded before password hashing and recover after the window', async () => {
+  const isolated = await fixture();
+  try {
+    const client = request(isolated.app);
+    for (let i = 0; i < 30; i++)
+      await client
+        .post('/api/auth/login')
+        .send({ email: 'unknown@example.com', password: 'wrong' })
+        .expect(401);
+    const denied = await client
+      .post('/api/auth/login')
+      .send({ email: 'vihaan4263@gmail.com', password: 'test-admin-password' })
+      .expect(429);
+    assert.equal(denied.headers['retry-after'], '60');
+    await isolated.pool.query(
+      "UPDATE activity SET created_at=NOW()-INTERVAL '2 minutes' WHERE event='Sign-in attempted'",
+    );
+    await client
+      .post('/api/auth/login')
+      .send({ email: 'vihaan4263@gmail.com', password: 'test-admin-password' })
+      .expect(200);
+  } finally {
+    await isolated.pool.end();
   }
 });

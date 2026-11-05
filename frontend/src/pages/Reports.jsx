@@ -14,7 +14,7 @@ export default function Reports() {
       const blob = await exportRecords({ period, year, quarter, month });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = url; link.download = `onevoice-${period}-${year}.zip`;
+      link.href = url; link.download = `onevoice-${period}${period === 'all' ? '' : `-${year}`}${period === 'month' ? `-${String(month).padStart(2, '0')}` : period === 'quarter' ? `-Q${quarter}` : ''}.zip`;
       link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }

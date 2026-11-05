@@ -1,5 +1,5 @@
 const LOCAL_API_BASE_URL = 'http://localhost:5000/api';
-const API_BASE = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? LOCAL_API_BASE_URL : '/api');
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? LOCAL_API_BASE_URL : '/api')).replace(/\/+$/, '');
 async function request(path, options = {}) {
   const { responseType, ...fetchOptions } = options;
   const token = localStorage.getItem('onevoice_token');
@@ -38,7 +38,11 @@ export const fetchActivity = () => request('/admin/activity');
 export const fetchGmailStatus = () => request('/gmail/status');
 export const startGmailConnect = () => request('/gmail/start', { headers: { 'X-Frontend-Origin': window.location.origin } });
 export const disconnectGmail = () => request('/gmail/connection', { method: 'DELETE' });
-export const syncGmail = () => post('/gmail/sync');
+export const syncGmail = async () => {
+  const result = await post('/gmail/sync');
+  if (result.failures) throw new Error('Gmail sync failed. Check the connection in Gmail settings.');
+  return result;
+};
 export const searchGmail = q => request(`/gmail/threads?${new URLSearchParams({ q })}`);
 export const linkGmailThread = (id, threadId) => post(`/logs/${id}/gmail-link`, { thread_id: threadId });
 export const createGmailDraft = (id, data) => post(`/logs/${id}/gmail-draft`, data);

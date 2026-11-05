@@ -19,9 +19,10 @@ export default function MeetingDetail() {
   const submit = async (event) => {
     event.preventDefault();
     setSaving(true);
+    setError('');
     try {
       const log = await addMeetingLog(id, form);
-      setMeeting(current => ({ ...current, logs: [...current.logs, log] }));
+      setMeeting(current => ({ ...current, updated_at: log.updated_at, logs: [...current.logs, log] }));
       setForm(emptyForm);
     } catch (err) {
       setError(err.message);

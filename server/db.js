@@ -11,7 +11,10 @@ import {
 
 pg.types.setTypeParser(1082, (value) => value);
 export function database(url) {
-  return new pg.Pool({ connectionString: url });
+  return new pg.Pool({
+    connectionString: url,
+    connectionTimeoutMillis: 10000,
+  });
 }
 export async function transaction(pool, work) {
   const client = await pool.connect();
@@ -147,4 +150,11 @@ export async function bootstrap(pool, config) {
       }
     }
   });
+}
+
+export async function touchAction(db, a) {
+  await db.query('UPDATE actions SET updated_at=NOW() WHERE id=$1', [a.id]);
+  await db.query('UPDATE meetings SET updated_at=NOW() WHERE id=$1', [
+    a.meeting_id,
+  ]);
 }

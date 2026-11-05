@@ -10,6 +10,7 @@ let auth;
 let action;
 let drafts = [];
 let threads;
+let failSync = false;
 const mail = (id, from, body, labels = []) => ({
   id,
   internalDate: '1793700000000',
@@ -33,7 +34,10 @@ before(async () => {
   const service = {
     users: {
       threads: {
-        get: async () => ({ data: { messages: threads } }),
+        get: async () => {
+          if (failSync) throw new Error('Mock outage');
+          return { data: { messages: threads } };
+        },
         list: async () => ({ data: { threads: [{ id: 'thread1' }] } }),
       },
       drafts: {
@@ -176,7 +180,32 @@ test('Gmail OAuth initiation uses PKCE and rejects mismatched or replayed browse
     .set(auth)
     .set('X-Frontend-Origin', 'https://untrusted.example')
     .expect(200);
-  const url = new URL(result.body.url);
+  assert.equal(result.headers['set-cookie'], undefined);
+  assert.equal(new URL(result.body.url).pathname, '/api/gmail/authorize');
+  await api
+    .post('/api/gmail/authorize')
+    .type('form')
+    .send({ state: result.body.state })
+    .expect(400);
+  await api
+    .post('/api/gmail/authorize')
+    .set('Origin', 'https://untrusted.example')
+    .type('form')
+    .send({ state: result.body.state })
+    .expect(400);
+  const navigation = await api
+    .post('/api/gmail/authorize')
+    .set('Origin', f.config.frontend)
+    .type('form')
+    .send({ state: result.body.state })
+    .expect(303);
+  await api
+    .post('/api/gmail/authorize')
+    .set('Origin', f.config.frontend)
+    .type('form')
+    .send({ state: result.body.state })
+    .expect(400);
+  const url = new URL(navigation.headers.location);
   assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
   const state = url.searchParams.get('state');
   const stored = await one(f.pool, 'SELECT * FROM oauth_states WHERE id=$1', [
@@ -185,7 +214,7 @@ test('Gmail OAuth initiation uses PKCE and rejects mismatched or replayed browse
   assert.equal(stored.return_origin, f.config.frontend);
   assert.ok(stored.verifier);
   await api.get(`/api/gmail/callback?state=${state}`).expect(400);
-  const cookie = result.headers['set-cookie'][0].split(';')[0];
+  const cookie = navigation.headers['set-cookie'][0].split(';')[0];
   await api
     .get('/api/gmail/callback?state=mismatch')
     .set('Cookie', cookie)
@@ -199,4 +228,36 @@ test('Gmail OAuth initiation uses PKCE and rejects mismatched or replayed browse
     .get(`/api/gmail/callback?state=${state}`)
     .set('Cookie', cookie)
     .expect(400);
+});
+
+test('failed sync reports failure and persists only one attention notification', async () => {
+  failSync = true;
+  try {
+    const before = (await api.get('/api/notifications').set(auth)).body.length;
+    for (let i = 0; i < 2; i++)
+      await api
+        .post('/api/gmail/sync')
+        .set(auth)
+        .send({})
+        .expect(200, { new_replies: 0, failures: 1 });
+    assert.equal(
+      (await api.get('/api/notifications').set(auth)).body.length,
+      before + 1,
+    );
+    assert.match(
+      (await api.get('/api/gmail/status').set(auth)).body.last_error,
+      /sync failed/,
+    );
+  } finally {
+    failSync = false;
+  }
+});
+
+test('Gmail disconnect invalidates pending OAuth states', async () => {
+  await api.get('/api/gmail/start').set(auth).expect(200);
+  await api.delete('/api/gmail/connection').set(auth).expect(200);
+  assert.equal(
+    Number((await one(f.pool, 'SELECT COUNT(*) AS n FROM oauth_states')).n),
+    0,
+  );
 });

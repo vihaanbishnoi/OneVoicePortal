@@ -1,10 +1,18 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, NavLink, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, NavLink, useNavigate, useParams } from 'react-router-dom';
 import { clearSession, fetchCurrentUser } from './api';
 import Login from './pages/Login'; import Home from './pages/WorkspaceHome'; import Calendar from './pages/Calendar'; import Notifications from './pages/Notifications';
 import AdminActivity from './pages/AdminActivity';
 import GmailSettings from './pages/GmailSettings';
 import NewMeeting from './pages/NewMeeting'; import Meetings from './pages/Meetings'; import MeetingDetail from './pages/MeetingDetail'; import LogDetail from './pages/LogDetail'; import Reports from './pages/Reports';
+function MeetingPage() {
+  const { id } = useParams();
+  return <MeetingDetail key={id} />;
+}
+function LogPage({ user }) {
+  const { logId } = useParams();
+  return <LogDetail key={logId} user={user} />;
+}
 function Shell({ user, logout }) {
   const navigate = useNavigate();
   const nav = [['/', 'Overview'], ['/calendar', 'Calendar'], ['/meetings', 'Meetings'],
@@ -30,8 +38,8 @@ function Shell({ user, logout }) {
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/new-meeting" element={<NewMeeting />} />
           <Route path="/meetings" element={<Meetings />} />
-          <Route path="/meetings/:id" element={<MeetingDetail user={user} />} />
-          <Route path="/meetings/:meetingId/logs/:logId" element={<LogDetail user={user} />} />
+          <Route path="/meetings/:id" element={<MeetingPage />} />
+          <Route path="/meetings/:meetingId/logs/:logId" element={<LogPage user={user} />} />
           <Route path="/reports" element={<Reports />} />
           {user.role === 'hr_admin' && <Route path="/activity" element={<AdminActivity />} />}
           {user.role === 'hr_admin' && <Route path="/gmail" element={<GmailSettings />} />}
@@ -60,7 +68,6 @@ function App() {
       fetchCurrentUser().then(currentUser => {
         if (active) {
           setUser(currentUser);
-          localStorage.setItem('onevoice_user', JSON.stringify(currentUser));
         }
       }).catch(error => {
         if (active && localStorage.getItem('onevoice_token')) setSessionError(error.message);

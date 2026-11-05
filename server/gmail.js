@@ -1,15 +1,45 @@
+import express from 'express';
 import { google } from 'googleapis';
 import { randomBytes, createHash } from 'node:crypto';
 import { convert } from 'html-to-text';
-import { rows, one, insert, transaction } from './db.js';
+import { rows, one, insert, transaction, touchAction } from './db.js';
 import {
   ADMIN_EMAIL,
   version,
   encryptCredentials,
   decryptCredentials,
 } from './security.js';
-import { fail, field } from './domain.js';
+import { fail, field, HttpError } from './domain.js';
 
+export function encodedSubject(subject) {
+  const chunks = [];
+  let chunk = '';
+  for (const character of subject.replace(/[\r\n]/g, ' ')) {
+    if (Buffer.byteLength(chunk + character) > 42) {
+      chunks.push(chunk);
+      chunk = '';
+    }
+    chunk += character;
+  }
+  chunks.push(chunk);
+  return chunks
+    .map((part) => '=?UTF-8?B?' + Buffer.from(part).toString('base64') + '?=')
+    .join('\r\n ');
+}
+function referenceHeader(name, value) {
+  let line = name + ':';
+  const lines = [];
+  for (const word of String(value).split(/\s+/).filter(Boolean)) {
+    if (word.length > 900) throw new Error('Invalid email reference');
+    if (line.length + word.length + 1 > 78) {
+      lines.push(line);
+      line = '';
+    }
+    line += ' ' + word;
+  }
+  lines.push(line);
+  return lines.join('\r\n');
+}
 const scopes = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.compose',
@@ -63,7 +93,7 @@ export async function serviceFor(db, userId, env) {
     await saveCredentials(db, userId, auth.credentials, env);
     return { service: google.gmail({ version: 'v1', auth }), connection };
   } catch (error) {
-    if (error.status) throw error;
+    if (error instanceof HttpError) throw error;
     fail(
       'Gmail authorization is unavailable or expired. Reconnect Gmail.',
       503,
@@ -109,12 +139,6 @@ export function messageBody(payload) {
   visit(payload);
   return (plain.length ? plain : html).join('\n').trim();
 }
-async function touch(db, a) {
-  await db.query('UPDATE actions SET updated_at=NOW() WHERE id=$1', [a.id]);
-  await db.query('UPDATE meetings SET updated_at=NOW() WHERE id=$1', [
-    a.meeting_id,
-  ]);
-}
 export async function syncAction(
   db,
   service,
@@ -151,9 +175,13 @@ export async function syncAction(
       direction: incoming ? 'incoming' : 'outgoing',
       source: 'gmail',
       external_id: m.id,
-      sent_at: new Date(Number(m.internalDate || 0)),
+      sent_at:
+        m.internalDate &&
+        Number.isFinite(new Date(Number(m.internalDate)).getTime())
+          ? new Date(Number(m.internalDate))
+          : null,
     });
-    await touch(db, action);
+    await touchAction(db, action);
     if (incoming && !initial) {
       await insert(db, 'notifications', {
         user_id: connection.user_id,
@@ -179,6 +207,7 @@ export async function syncGmail(pool, config, userId = null, services = {}) {
       [ADMIN_EMAIL, userId],
     );
     let total = 0;
+    let failures = 0;
     for (const c of connections) {
       await db.query('SAVEPOINT gmail_sync');
       try {
@@ -200,6 +229,7 @@ export async function syncGmail(pool, config, userId = null, services = {}) {
         total += added;
         await db.query('RELEASE SAVEPOINT gmail_sync');
       } catch {
+        failures++;
         await db.query('ROLLBACK TO SAVEPOINT gmail_sync');
         const message =
           'Gmail sync failed. Check the connection in Admin Gmail settings.';
@@ -215,7 +245,7 @@ export async function syncGmail(pool, config, userId = null, services = {}) {
         );
       }
     }
-    return { new_replies: total };
+    return { new_replies: total, ...(failures ? { failures } : {}) };
   });
 }
 
@@ -247,7 +277,7 @@ export function gmailRoutes(
     });
   });
   app.get('/api/gmail/start', require('hr_admin'), async (req, res) => {
-    const auth = oauth(env);
+    oauth(env);
     const state = randomBytes(32).toString('hex');
     const verifier = randomBytes(48).toString('base64url');
     const origin = req.get('X-Frontend-Origin');
@@ -269,28 +299,71 @@ export function gmailRoutes(
         ],
       );
     });
-    res.cookie('onevoice_oauth', state, {
-      signed: true,
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: config.frontend.startsWith('https://'),
-      maxAge: 600000,
-      path: '/api/gmail',
-    });
     res.json({
-      url: auth.generateAuthUrl({
-        access_type: 'offline',
-        prompt: 'consent',
-        include_granted_scopes: true,
-        scope: scopes,
-        state,
-        code_challenge: createHash('sha256')
-          .update(verifier)
-          .digest('base64url'),
-        code_challenge_method: 'S256',
-      }),
+      url: new URL(
+        '/api/gmail/authorize',
+        env.GMAIL_REDIRECT_URI || 'http://localhost:5000/api/gmail/callback',
+      ).href,
+      state,
     });
   });
+  // A top-level form navigation can set the callback cookie even when the UI
+  // and API are on different sites. Origin validation prevents cross-site forms
+  // from binding somebody else's pending authorization to the victim browser.
+  app.post(
+    '/api/gmail/authorize',
+    express.urlencoded({ extended: false, limit: 1024 }),
+    async (req, res) => {
+      const ticket = field(req.body, 'state', 64);
+      const state = randomBytes(32).toString('hex');
+      const pending = await transaction(pool, async (db) => {
+        const row = await one(
+          db,
+          'UPDATE oauth_states SET id=$1 WHERE id=$2 AND expires_at > NOW() AND return_origin=$3 RETURNING *',
+          [state, ticket, req.get('Origin') || ''],
+        );
+        if (!row)
+          fail(
+            'Gmail connection request expired or invalid. Start again from Admin.',
+            400,
+          );
+        const user = await one(db, 'SELECT * FROM users WHERE id=$1', [
+          row.user_id,
+        ]);
+        if (
+          !eligible(user) ||
+          user.role !== 'hr_admin' ||
+          row.credential_version !== version(user)
+        )
+          fail('Admin session unavailable', 401);
+        return row;
+      });
+      res.cookie('onevoice_oauth', state, {
+        signed: true,
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: (env.GMAIL_REDIRECT_URI || config.frontend).startsWith(
+          'https://',
+        ),
+        maxAge: 600000,
+        path: '/api/gmail',
+      });
+      res.redirect(
+        303,
+        oauth(env).generateAuthUrl({
+          access_type: 'offline',
+          prompt: 'consent',
+          include_granted_scopes: true,
+          scope: scopes,
+          state,
+          code_challenge: createHash('sha256')
+            .update(pending.verifier)
+            .digest('base64url'),
+          code_challenge_method: 'S256',
+        }),
+      );
+    },
+  );
   app.get('/api/gmail/callback', async (req, res) => {
     const state = req.signedCookies.onevoice_oauth;
     res.clearCookie('onevoice_oauth', {
@@ -374,6 +447,9 @@ export function gmailRoutes(
   app.delete('/api/gmail/connection', require('hr_admin'), async (req, res) => {
     await transaction(pool, async (db) => {
       await db.query('DELETE FROM gmail_connections WHERE user_id=$1', [
+        req.user.id,
+      ]);
+      await db.query('DELETE FROM oauth_states WHERE user_id=$1', [
         req.user.id,
       ]);
       await audit(db, req, 'Gmail disconnected');
@@ -484,15 +560,18 @@ export function gmailRoutes(
             subject = h.subject || subject;
             if (h['message-id'])
               extra.push(
-                `In-Reply-To: ${clean(h['message-id'])}`,
-                `References: ${clean((h.references || '') + ' ' + h['message-id'])}`,
+                referenceHeader('In-Reply-To', h['message-id']),
+                referenceHeader(
+                  'References',
+                  (h.references || '') + ' ' + h['message-id'],
+                ),
               );
             message.threadId = a.gmail_thread_id;
           }
           const raw = [
             `To: ${clean(a.contact_email)}`,
             `From: ${clean(connection.mailbox)}`,
-            `Subject: =?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`,
+            `Subject: ${encodedSubject(subject)}`,
             ...extra,
             'MIME-Version: 1.0',
             'Content-Type: text/plain; charset=UTF-8',

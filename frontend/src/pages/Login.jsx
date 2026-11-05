@@ -24,7 +24,6 @@ export default function Login({ onLogin }) {
       const result = mode === 'demo' ? await startDemo() : await login(credentials);
       localStorage.setItem('onevoice_token', result.token);
       // Cached for convenience only; App verifies identity with the backend.
-      localStorage.setItem('onevoice_user', JSON.stringify(result.user));
       onLogin(result.user);
     } catch (err) {
       setError(err.message);

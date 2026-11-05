@@ -1,7 +1,7 @@
 import { settings } from './config.js';
 import { database, bootstrap } from './db.js';
-import { createApp, syncGmail } from './app.js';
-import { configured } from './gmail.js';
+import { createApp } from './app.js';
+import { configured, syncGmail } from './gmail.js';
 
 const config = settings();
 const pool = database(config.databaseUrl);

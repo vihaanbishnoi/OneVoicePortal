@@ -17,7 +17,7 @@ Admin workspace. Recruiter demos never use a connected mailbox.
    For deployment add `https://YOUR-SITE/api/gmail/callback` as well.
 5. Put the client ID and client secret in your ignored `.env`, never in a React
    file or Git. Set `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and
-   `GMAIL_REDIRECT_URI`. The local token encryption key has already been generated.
+   `GMAIL_REDIRECT_URI`. Set `GMAIL_TOKEN_ENCRYPTION_KEY` to a freshly generated 32-byte base64 key for a new installation. Reuse the existing key when upgrading.
    Keep that key stable: changing it makes saved mailbox credentials unreadable.
 6. Restart the backend. Sign in as Admin, open Gmail connection, and click
    Connect Gmail. Choose the intended mailbox and review Google's consent screen.
@@ -30,6 +30,11 @@ Admin workspace. Recruiter demos never use a connected mailbox.
 8. Generate or edit an email draft. Review the recipient, facts, subject, and
    body. Save draft to Gmail creates an unsent draft; open Gmail to review and
    send it yourself. Later replies stay linked through the Gmail thread ID.
+
+For separate frontend/API origins, configure `FRONTEND_URL` and `CORS_ORIGINS`
+to the frontend origin and `GMAIL_REDIRECT_URI` to the API callback. Authorization
+uses a one-time form handoff validated against the initiating frontend origin;
+it sets the signed callback cookie during top-level navigation.
 
 The requested scopes are `gmail.readonly` and `gmail.compose`. These scopes can
 require Google's verification/review depending on the app's publishing and data

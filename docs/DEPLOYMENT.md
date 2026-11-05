@@ -22,6 +22,16 @@ for historical meeting rows. Back up a production database before upgrades.
 
 ## Existing Render service
 
+The current deployment uses separate API and static frontend services. For the
+API, leave Root Directory blank, set Build Command to `npm ci --omit=dev`, and
+Start Command to `npm start`. The API starts Express even if an older service
+still displays a Python runtime label. Set `FRONTEND_URL` and `CORS_ORIGINS` to
+`https://onevoiceportal.onrender.com`. The frontend build uses
+`VITE_API_BASE_URL=https://onevoice-api-89c5.onrender.com/api`.
+
+The Docker instructions below describe the optional combined deployment; do
+not apply the blueprint to the existing split services without reviewing it.
+
 The `Optimization` commit introduced a required `ADMIN_PASSWORD` and public
 startup checks. Render sets `RENDER=true`, so these checks apply even if
 `PUBLIC_DEPLOYMENT` is unset or 0. A missing/short Admin password, a signing key
@@ -93,6 +103,10 @@ changing credentials or SSL query parameters. TLS verification is not disabled.
 See [migration details](DEVELOPMENT.md#migration-from-flask) before switching.
 
 ## Operational limits
+
+- Password login permits 30 attempts per rolling minute across the service; a
+  limit response returns HTTP 429 with `Retry-After: 60`. This cap runs before
+  password hashing and is shared across instances through PostgreSQL.
 
 - Each anonymous demo creates a separate fictional workspace and expires after
   12 hours. Admin can see session events, not verified recruiter identities.

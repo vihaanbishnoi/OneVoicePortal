@@ -24,6 +24,7 @@ export function date(value) {
   if (
     typeof value !== 'string' ||
     !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+    value.startsWith('0000-') ||
     !Number.isFinite(Date.parse(value)) ||
     new Date(value).toISOString().slice(0, 10) !== value
   )
@@ -42,6 +43,10 @@ export function email(value) {
 }
 export const pick = (value, keys) =>
   Object.fromEntries(keys.split(' ').map((key) => [key, value[key] ?? null]));
+export const validId = (value) =>
+  /^\d+$/.test(String(value)) &&
+  Number(value) >= 1 &&
+  Number(value) <= 2147483647;
 export const userJson = (u, demo = null) => ({
   id: u.id,
   name: u.name,
