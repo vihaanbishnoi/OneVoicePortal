@@ -221,7 +221,7 @@ and Express while retaining React and PostgreSQL. The application now uses PERN,
 not MERN: MongoDB is not part of this project. The user supplied a role skills list
 including Full Stack/MERN, Python/SQL/data engineering, AWS/GCP, and Drupal; this
 project covers only part of that list and does not demonstrate every listed skill.
-Legacy Python code remains for migration reference; the active backend is server/.
+The active backend is server/. Legacy Python source was removed; migration history remains in Git.
 The README links a Render demo; its current availability and deployed code
 version have not been verified. Existing code is a learning baseline, not proof
 that every workflow is correct or complete.

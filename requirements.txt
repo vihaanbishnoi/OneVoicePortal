@@ -1,2 +1,0 @@
-# Application dependencies; training/notebook libraries are not required.
--r requirements-postgres.txt

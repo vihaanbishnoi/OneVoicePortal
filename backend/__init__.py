@@ -1,1 +1,0 @@
-"""OneVoice backend package."""
